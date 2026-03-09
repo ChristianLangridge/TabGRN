@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spatialmt"
+version = "0.1.0"
+description = "Spatial mechano-transcriptomics pipeline"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+
+dependencies = [
+    "pandas",
+    "numpy",
+]
+
+[tool.setuptools.packages.find]
+where = ["path"]
+
+# ---------------------------------------------------------------------------
+# After cloning, run once from the project root:
+#   pip install -e .
+#
+# This registers the package so that `import spatialmt` works from any
+# notebook, script, or SLURM job — regardless of where Python was launched.
+# ---------------------------------------------------------------------------
