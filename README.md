@@ -54,7 +54,7 @@ conda env create -f smt_pipeline.yml
 
 ## Usage
 
-### 1. Installing `pip install -e .`
+### 1. Package registration
 
 Before running scripts, register the package using `pip install -e .` from the project root with `pyproject.toml`. 
 
