@@ -87,10 +87,10 @@ class Dirs:
     root     = PROJECT_ROOT
     data     = PROJECT_ROOT / "data"
     raw      = PROJECT_ROOT / "data" / "raw"
-    interim  = PROJECT_ROOT / "data" / "interim"
+    #interim  = PROJECT_ROOT / "data" / "interim"
     processed = PROJECT_ROOT / "data" / "processed"
     results  = PROJECT_ROOT / "results"
-    models   = PROJECT_ROOT / "models"
+    #models   = PROJECT_ROOT / "models"
     src      = PROJECT_ROOT / "src"
 
 
@@ -102,12 +102,12 @@ class Paths:
     Never hardcode a path anywhere else in the codebase.
     """
     # --- raw inputs --------------------------------------------------------
-    raw_tpm        = Dirs.raw      / "Original_TPM_data.csv"
-    raw_tpm_txt    = Dirs.raw      / "Original_TPM_data.txt"
+    raw_tpm        = Dirs.raw      / "/Users/christianlangridge/Desktop/SMT-Pipeline/data/raw/Original_TPM_data.csv"
+    raw_tpm_txt    = Dirs.raw      / "/Users/christianlangridge/Desktop/SMT-Pipeline/data/raw/Original_TPM_data.txt"
     
 
     # --- interim (post-cleaning, pre-feature-engineering) ------------------
-    clean_tpm      = Dirs.interim  / "clean_tpm.csv"
+    #clean_tpm      = Dirs.interim  / "clean_tpm.csv"
 
     # --- processed (model-ready) -------------------------------------------
     processed_tpm  = Dirs.processed / "processed_tpm.csv"
@@ -142,7 +142,7 @@ def setup_output_dirs() -> None:
             validate_raw_inputs()
         dist.barrier()
     """
-    for _dir in (Dirs.interim, Dirs.processed, Dirs.results, Dirs.models):
+    for _dir in (Dirs.processed, Dirs.results):
         _dir.mkdir(parents=True, exist_ok=True)
 
 
