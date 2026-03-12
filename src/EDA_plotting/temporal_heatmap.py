@@ -61,20 +61,21 @@ g = sns.clustermap(
         row_cluster=True,
         col_cluster=False, # preserve chronological timepoint order
         figsize=(12, max(12, len(z_matrix) * 0.003)),
-        yticklabels=True,
+        yticklabels=False, # change if you want specific genes labels to show up 
         xticklabels=True,
         linewidths=0.0,
-        cbar_pos=(0.06, 0.45, 0.03, 0.12),
-        cbar_kws={'label': 'Z-score (log₂ TPM+1)', 'shrink': 0.5},
+        cbar_pos=(0.035, 0.40, 0.05, 0.25),
+        cbar_kws={'label': 'Z-score (log₂ TPM+1)', 'shrink': 0.5, 'format': '%.1f'}
     )
  
  # Rotate x-axis labels for readability
 g.ax_heatmap.set_xticklabels(
-g.ax_heatmap.get_xticklabels(), rotation=45, ha='right', fontsize=10)
-
+g.ax_heatmap.get_xticklabels(), rotation=45, ha='right', fontsize=15)
 g.ax_heatmap.set_yticklabels(g.ax_heatmap.get_yticklabels(), rotation=0, fontsize=7)
-g.ax_heatmap.set_xlabel('Timepoint', fontsize=11)
-g.ax_heatmap.set_ylabel('Gene', fontsize=11)
+
+# increase size of label 
+g.ax_cbar.set_ylabel('Z-score (log₂ TPM+1)', fontsize=15, fontweight = 'bold')
+g.ax_cbar.tick_params(labelsize=10)
  
 # including same labels to the genes of interest we care about retrospectively
 # all the same as original Lancaster paper (missing TBR2 in data)
@@ -83,12 +84,11 @@ genes_of_interest = ['GATA3','CDH2','CDH1','VIM','TBR1']
 structural_genes_of_interest = ['FN1','TJP1','MYH9','MYH10','SPTAN1','ACTG1']
 all_genes = genes_of_interest + structural_genes_of_interest
 
-for label in g.ax_heatmap.get_yticklabels():
-    if label.get_text() in all_genes:
-        label.set_visible(True)
-        label.set_fontsize(10)
-        label.set_color('orange')   
-    else:
-        label.set_visible(False)
+#for label in g.ax_heatmap.get_yticklabels():
+    #if label.get_text() in all_genes:
+        #label.set_visible(True)
+        #label.set_fontsize(13) 
+    #else:
+        #label.set_visible(False)
         
 plt.show()

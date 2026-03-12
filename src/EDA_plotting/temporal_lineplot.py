@@ -30,30 +30,39 @@ mean_cols = [f'meanH9_{t}' for t in timepoints]
 sd_cols   = [f'sdH9_{t}'   for t in timepoints]
 x = np.arange(len(timepoints))
 
-# 11 genes from subset_expr
-genes = subset_expr['hgnc_symbol'].tolist()  
+# line plotting - UPDATED to 2 rows x 6 columns
+fig, axes = plt.subplots(2, 6, figsize=(24, 10))
 
-# line plotting 
-fig, axes = plt.subplots(4, 3, figsize=(15, 16))
-axes = axes.flatten()  # easier to index
+# Group the lists by their target row index
+gene_rows = [
+    (0, genes_of_interest),              # Top row (index 0) gets 5 genes
+    (1, structural_genes_of_interest)    # Bottom row (index 1) gets 6 genes
+]
 
-for i, (ax, gene) in enumerate(zip(axes, genes)):
-    row = subset_expr[subset_expr['hgnc_symbol'] == gene].iloc[0]
-    
-    means = row[mean_cols].values.astype(float)
-    sds   = row[sd_cols].values.astype(float)
-    
-    ax.errorbar(x, means, yerr=sds, fmt='-o', capsize=4, linewidth=2, markersize=5)
-    ax.set_title(gene, fontweight='bold')
-    ax.set_xticks(x)
-    ax.set_xticklabels(timepoints)
-    ax.set_xlabel('Day')
-    ax.set_ylabel('Mean TPM')
-    ax.grid(True, alpha=0.3)
+for row_idx, gene_list in gene_rows:
+    for col_idx, gene in enumerate(gene_list):
+        ax = axes[row_idx, col_idx]
+        
+        # Extract data for the specific gene
+        gene_data = subset_expr[subset_expr['hgnc_symbol'] == gene]
+        
+        # Plot if the gene exists in the subset
+        if not gene_data.empty:
+            row = gene_data.iloc[0]
+            means = row[mean_cols].values.astype(float)
+            sds   = row[sd_cols].values.astype(float)
+            
+            ax.errorbar(x, means, yerr=sds, fmt='-o', capsize=4, linewidth=2, markersize=5)
+            ax.set_title(gene, fontsize=15, fontweight='bold')
+            ax.set_xticks(x)
+            ax.set_xticklabels(timepoints)
+            ax.tick_params(axis='both', labelsize=15)
+            ax.set_xlabel('Day', fontsize=17, fontweight='bold')
+            ax.set_ylabel('Mean TPM', fontsize=17, fontweight='bold')
+            ax.grid(True, alpha=0.3)
 
-# Hide the empty 12th subplot (4x3 grid = 12 slots, you have 11 genes)
-axes[-1].set_visible(False)
+# Hide the empty 6th subplot in the first row (row 0, column 5)
+axes[0, 5].set_visible(False)
 
-plt.suptitle('Structural Gene Panel Expression Over NE Organoid Developmental Time (H9 line)', fontsize=14, fontweight='bold', y=1.01)
 plt.tight_layout()
 plt.show()

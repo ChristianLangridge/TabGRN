@@ -70,11 +70,10 @@ for rep, colour in colours.items():
     
     # Label each point with its day
     for (x, y), day in zip(rep_pcs, rep_days_sorted):
-        ax.annotate(f'd{day}', (x, y), textcoords='offset points', xytext=(5, 5), fontsize=7)
+        ax.annotate(f'd{day}', (x, y), textcoords='offset points', xytext=(5, 5), fontsize=12)
 
-ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]*100:.1f}% variance)')
-ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]*100:.1f}% variance)')
-ax.set_title('H9 NE organoid developmental trajectory — PCA of log2(TPM+1)')
+ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]*100:.1f}% variance)', fontsize=15)
+ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]*100:.1f}% variance)', fontsize=15)
 ax.legend()
 plt.tight_layout()
 plt.show()
