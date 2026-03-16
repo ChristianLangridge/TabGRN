@@ -86,6 +86,8 @@ class Dirs:
     """Top-level directories."""
     root     = PROJECT_ROOT
     data     = PROJECT_ROOT / "data"
+    tpm      = PROJECT_ROOT / "data" / "tpm"
+    
     raw      = PROJECT_ROOT / "data" / "raw"
     #interim  = PROJECT_ROOT / "data" / "interim"
     processed = PROJECT_ROOT / "data" / "processed"
@@ -103,12 +105,13 @@ class Paths:
     Never hardcode a path anywhere else in the codebase.
     """
     # --- raw inputs --------------------------------------------------------
-    raw_tpm_csv    = Dirs.raw      / "Original_TPM_data.csv"
+    raw_tpm_csv    = Dirs.tpm      / "Original_TPM_data.csv"
     raw_tpm_txt    = Dirs.raw      / "Original_TPM_data.txt"
+    raw_count_csv = Dirs.raw / "raw_counts_GRCh38_p13_NCBI.csv"
     
 
     # --- interim (post-cleaning, pre-feature-engineering) ------------------
-    #clean_tpm      = Dirs.interim  / "clean_tpm.csv"
+    #cleaned_raw_count_csv      = Dirs.raw  / "cleaned_raw_count.csv"
 
     # --- processed (model-ready) -------------------------------------------
     processed_tpm  = Dirs.processed / "processed_tpm.csv"

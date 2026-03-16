@@ -217,6 +217,9 @@ results/
 *.log
 *.txt
 
+# ignore GEO mappings
+*.gz
+
 # MAC-OS added files
 .DS_Store
 
