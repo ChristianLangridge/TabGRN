@@ -85,37 +85,35 @@ PROJECT_ROOT: Path = _find_project_root()
 class Dirs:
     """Top-level directories."""
     root     = PROJECT_ROOT
-    
-    
-    test     = PROJECT_ROOT / "test"
-    
+        
     
     data     = PROJECT_ROOT / "data"
     
     # EDA data
-    EDA_tpm      = PROJECT_ROOT / "data" / "EDA_tpm"
-    EDA_raw      = PROJECT_ROOT / "data" / "EDA_raw"
-    EDA_processed = PROJECT_ROOT / "data" / "EDA_tpm" / "EDA_processed"
+    EDA      = PROJECT_ROOT / "data" / "EDA"
+    EDA_processed = PROJECT_ROOT / "data" / "processed"
     
-    # sc-RNA-seq model data
-    model_data = PROJECT_ROOT / "data" / "model_data"
+    # sc-RNA-seq training data
+    model_data = PROJECT_ROOT / "data" / "training_data"
+    model_data_anndata = PROJECT_ROOT / "data" / "training_data" / "AnnData"
+    model_data_unstiched = PROJECT_ROOT / "data" / "training_data" / "matrix_bundle"
+    
+    # WLS validation data
+    WLS_ko_data = PROJECT_ROOT / "data" / "GLI3_ko_validation"
+    WLS_ko_data_anndata = PROJECT_ROOT / "data" / "GLI3_ko_validation" / "AnnData"
+    WLS_ko_data_unstiched = PROJECT_ROOT / "data" / "GLI3_ko_validation" / "matrix_bundle"
+    
+    # GLI3 validation data
+    GLI3_ko_data = PROJECT_ROOT / "data" / "WLS_ko_validation"
+    GLI3_ko_data_anndata = PROJECT_ROOT / "data" / "WLS_ko_validation" / "AnnData"
+    GLI3_ko_data_unstiched = PROJECT_ROOT / "data" / "WLS_ko_validation" / "matrix_bundle"
     
     
-    
-    results  = PROJECT_ROOT / "results"
-    
-    
+    # src (run) folder 
     src      = PROJECT_ROOT / "src"
     EDA_plotting = PROJECT_ROOT / "src" / "EDA_plotting"
     
     
-    organoid_pinn = PROJECT_ROOT / "organoid_pinn"
-    point_cloud = PROJECT_ROOT / "organoid_pinn" / "point_cloud"
-    physics = PROJECT_ROOT / "organoid_pinn" / "physics"
-    network = PROJECT_ROOT / "organoid_pinn" / "network"
-    solver = PROJECT_ROOT / "organoid_pinn" / "solver"
-    loss = PROJECT_ROOT / "organoid_pinn" / "loss"
-    training = PROJECT_ROOT / "organoid_pinn" / "training"
 
 
 class Paths:
@@ -125,15 +123,21 @@ class Paths:
     Add a new entry here whenever you introduce a new canonical data file.
     Never hardcode a path anywhere else in the codebase.
     """
-    # --- EDA Lancaster time-series bulk RNA data  --------------------------------------------------------
-    raw_tpm_csv    = Dirs.EDA_tpm      / "Original_TPM_data.csv"
-    raw_tpm_txt    = Dirs.EDA_raw      / "Original_TPM_data.txt"
-    raw_count_csv = Dirs.EDA_raw / "raw_counts_GRCh38_p13_NCBI.csv"
-    biomark_key_txt = Dirs.EDA_raw / "biomart_key.txt"
+    # --- EDA Lancaster time-series bulk RNA-seq  --------------------------------------------------------
+    unfiltered_EDA_tpm    = Dirs.EDA     / "Original_TPM_data.csv"
     
-    # --- processed (model-ready) -------------------------------------------
-    processed_tpm  = Dirs.EDA_processed / "processed_tpm.csv"
+    # --- EDA Lancaster time-series (processed) -------------------------------------------
+    processed_EDA_tpm  = Dirs.EDA_processed / "processed_tpm.csv"
 
+    # --- Training Jain et al. 2025 time-series sc-RNA-seq (unfiltered) -------------------------------------------
+    unfiltered_train_tpm  = Dirs.model_data_anndata / "neurectoderm_complete.h5ad"
+    
+    # --- Validation Jain et al. 2025 WLS-KO sc-RNA-seq (unfiltered) -------------------------------------------
+    unfiltered_WLS_ko_tpm  = Dirs.WLS_ko_data_anndata / "WLS_ko.h5ad"
+    
+    # --- Validation He et al. 2022 GLI3-KO sc-RNA-seq (unfiltered) -------------------------------------------
+    unfiltered_GLI3_ko_tpm  = Dirs.GLI3_ko_data_anndata / "GLI3_ko.h5ad"
+    
 
 # ---------------------------------------------------------------------------
 # Filesystem setup
@@ -184,8 +188,11 @@ def validate_raw_inputs() -> None:
     Call this ONCE on rank 0 only in distributed runs (see setup_output_dirs).
     """
     required = {
-        "Original TPM CSV":  Paths.raw_tpm_csv,
-        "Raw data file CSV": Paths.raw_count_csv,
+        "Unfiltered EDA bulk RNA-seq CSV":  Paths.unfiltered_EDA_tpm,
+        "Unfiltered train sc-RNA-seq h5ad": Paths.unfiltered_train_tpm,
+        "Unfiltered WLS-KO validation sc-RNA-seq h5ad": Paths.unfiltered_WLS_ko_tpm,
+        "Unfiltered GLI3-KO validation sc-RNA-seq h5ad": Paths.unfiltered_GLI3_ko_tpm,
+        
     }
     missing = {name: path for name, path in required.items() if not path.exists()}
     if missing:
