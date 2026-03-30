@@ -91,27 +91,36 @@ class Dirs:
     
     # EDA data
     EDA      = PROJECT_ROOT / "data" / "EDA"
-    EDA_processed = PROJECT_ROOT / "data" / "processed"
+    EDA_processed = PROJECT_ROOT / "data" / "EDA" / "processed"
     
     # sc-RNA-seq training data
     model_data = PROJECT_ROOT / "data" / "training_data"
     model_data_anndata = PROJECT_ROOT / "data" / "training_data" / "AnnData"
+    model_data_ml = PROJECT_ROOT / "data" / "training_data" / "ML_data"
     model_data_unstiched = PROJECT_ROOT / "data" / "training_data" / "matrix_bundle"
     
     # WLS validation data
-    WLS_ko_data = PROJECT_ROOT / "data" / "GLI3_ko_validation"
-    WLS_ko_data_anndata = PROJECT_ROOT / "data" / "GLI3_ko_validation" / "AnnData"
-    WLS_ko_data_unstiched = PROJECT_ROOT / "data" / "GLI3_ko_validation" / "matrix_bundle"
-    
+    WLS_ko_data = PROJECT_ROOT / "data" / "WLS_ko_validation"
+    WLS_ko_data_anndata = PROJECT_ROOT / "data" / "WLS_ko_validation" / "AnnData"
+    WLS_ko_data_ml = PROJECT_ROOT / "data" / "WLS_ko_validation" / "ML_data"
+    WLS_ko_data_unstiched = PROJECT_ROOT / "data" / "WLS_ko_validation" / "matrix_bundle"
+
     # GLI3 validation data
-    GLI3_ko_data = PROJECT_ROOT / "data" / "WLS_ko_validation"
-    GLI3_ko_data_anndata = PROJECT_ROOT / "data" / "WLS_ko_validation" / "AnnData"
-    GLI3_ko_data_unstiched = PROJECT_ROOT / "data" / "WLS_ko_validation" / "matrix_bundle"
+    GLI3_ko_data = PROJECT_ROOT / "data" / "GLI3_ko_validation"
+    GLI3_ko_data_anndata = PROJECT_ROOT / "data" / "GLI3_ko_validation" / "AnnData"
+    GLI3_ko_data_ml = PROJECT_ROOT / "data" / "GLI3_ko_validation" / "ML_data"
+    GLI3_ko_data_unstiched = PROJECT_ROOT / "data" / "GLI3_ko_validation" / "matrix_bundle"
     
     
-    # src (run) folder 
+    # src (run) folder
     src      = PROJECT_ROOT / "src"
     EDA_plotting = PROJECT_ROOT / "src" / "EDA_plotting"
+
+    # Output
+    results  = PROJECT_ROOT / "results"
+    trained_models = PROJECT_ROOT / "results" / "trained_models"
+    SHAP_values = PROJECT_ROOT / "results" / "SHAP_values"
+    
     
     
 
@@ -168,7 +177,7 @@ def setup_output_dirs() -> None:
             validate_raw_inputs()
         dist.barrier()
     """
-    for _dir in (Dirs.EDA_processed, Dirs.results):
+    for _dir in (Dirs.results, Dirs.trained_models, Dirs.SHAP_values, Dirs.model_data_ml):
         _dir.mkdir(parents=True, exist_ok=True)
 
 
@@ -199,6 +208,6 @@ def validate_raw_inputs() -> None:
         lines = "\n".join(f"  {name}: {path}" for name, path in missing.items())
         raise FileNotFoundError(
             f"Missing raw input file(s):\n{lines}\n\n"
-            f"Expected inside: {Dirs.raw}\n"
+            f"Expected inside: {Dirs.data}\n"
             "Copy or symlink your source data there before running the pipeline."
         )
