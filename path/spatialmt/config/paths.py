@@ -127,6 +127,8 @@ class Dirs:
     nearest_centroid = PROJECT_ROOT / "results" / "trained_models" / "baselines" / "cell_identity" / "nearest_centroid"
     xgb_classifier = PROJECT_ROOT / "results" / "trained_models" / "baselines" / "cell_identity" / "xgb_classifier"
     pseudo_time_regression = PROJECT_ROOT / "results" / "trained_models" / "baselines" / "pseudo_time_regression"
+    linear_regressor = PROJECT_ROOT / "results" / "trained_models" / "baselines" / "pseudo_time_regression" / "linear_regressor"
+    xgb_regressor = PROJECT_ROOT / "results" / "trained_models" / "baselines" / "pseudo_time_regression" / "xgb_regressor"
     custom = PROJECT_ROOT / "results" / "trained_models" / "custom"
     SHAP_values = PROJECT_ROOT / "results" / "SHAP_values"
     
@@ -190,7 +192,8 @@ def setup_output_dirs() -> None:
             validate_raw_inputs()
         dist.barrier()
     """
-    for _dir in (Dirs.results, Dirs.trained_models, Dirs.SHAP_values, Dirs.model_data_ml):
+    for _dir in (Dirs.results, Dirs.trained_models, Dirs.SHAP_values, Dirs.model_data_ml,
+                 Dirs.linear_regressor, Dirs.xgb_regressor):
         _dir.mkdir(parents=True, exist_ok=True)
 
 
