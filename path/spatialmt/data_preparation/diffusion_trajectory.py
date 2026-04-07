@@ -80,10 +80,41 @@ def run_pca(adata: sc.AnnData, n_comps: int = 10) -> sc.AnnData:
     return adata
 
 
-def build_graph(adata: sc.AnnData, n_neighbors: int = 20, n_pcs: int = 10) -> sc.AnnData:
-    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
+def build_graph(
+    adata: sc.AnnData,
+    n_neighbors: int = 20,
+    n_pcs: int = 10,
+    use_harmony: bool = False,
+    batch_key: str = "orig.ident",
+) -> sc.AnnData:
+    """
+    Build neighbour graph and diffusion map.
+
+    Parameters
+    ----------
+    use_harmony : bool
+        If True, run Harmony batch correction on the PCA embedding before
+        building the neighbour graph. Requires harmonypy to be installed.
+        Use this to attempt recovery of anomalous timepoint pseudotime
+        (e.g. D21 batch effect). Compare outputs with and without to assess
+        whether correction resolves the discontinuity.
+    batch_key : str
+        obs column used as the Harmony batch variable. Default "orig.ident".
+    """
+    if use_harmony:
+        try:
+            sc.external.pp.harmony_integrate(adata, key=batch_key)
+            use_rep = "X_pca_harmony"
+            print(f"Harmony integration on '{batch_key}' complete")
+        except Exception as e:
+            warnings.warn(f"Harmony failed ({e}) — falling back to uncorrected PCA")
+            use_rep = "X_pca"
+    else:
+        use_rep = "X_pca"
+
+    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs, use_rep=use_rep)
     sc.tl.diffmap(adata, n_comps=15)
-    print(f"Neighbours: k={n_neighbors}, n_pcs={n_pcs} | Diffusion map: 15 components")
+    print(f"Neighbours: k={n_neighbors}, n_pcs={n_pcs}, use_rep={use_rep} | Diffusion map: 15 components")
     return adata
 
 
@@ -315,6 +346,7 @@ def compute_diffusion_pseudotime(
     n_top_genes: int = 2000,
     n_pcs: int = 10,
     n_neighbors: int = 20,
+    use_harmony: bool = False,
 ) -> pd.Series:
     """
     Full diffusion pseudotime pipeline on a log-normalised AnnData.
@@ -358,7 +390,7 @@ def compute_diffusion_pseudotime(
     adata_traj = run_pca(adata_traj, n_pcs)
 
     print("\n── Neighbour graph + diffusion map ──")
-    adata_traj = build_graph(adata_traj, n_neighbors, n_pcs)
+    adata_traj = build_graph(adata_traj, n_neighbors, n_pcs, use_harmony=use_harmony)
 
     print("\n── Root cell selection ──")
     adata_traj = select_root(adata_traj)
