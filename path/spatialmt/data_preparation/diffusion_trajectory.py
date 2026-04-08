@@ -15,7 +15,7 @@ Pipeline
 8.  Root cell: highest POU5F1 in HB4_D5 (fallback: random D5 cell)
 9.  DPT
 10. Rank-transform → pseudotime ∈ (0, 1]
-11. Post-hoc pseudotime assignment for excluded proliferating cells (NN in PCA space)
+11. Post-hoc pseudotime assignment for excluded proliferating cecompute_diffusion_pseudotimels (NN in PCA space)
 12. Save full h5ad to model_data_anndata
 """
 
