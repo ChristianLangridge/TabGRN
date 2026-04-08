@@ -172,6 +172,8 @@ def assign_prolif_pseudotime(
         Must be aligned to adata_prolif row order.
     """
     if adata_prolif.n_obs == 0:
+        adata_prolif.obs["pseudotime"] = pd.Series(dtype=float)
+        adata_prolif.obs["dpt_pseudotime"] = pd.Series(dtype=float)
         return adata_prolif
 
     print("Assigning pseudotime to proliferating cells via NN in PCA space...")
@@ -347,7 +349,7 @@ def plot_raw_vs_ranked(adata_traj: sc.AnnData, fig_dir) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Top-level function — called from data_prep.py
+# No-integration DPT-pseudotime label generation — called from data_prep.py
 # ---------------------------------------------------------------------------
 
 def compute_diffusion_pseudotime(
@@ -442,7 +444,8 @@ def compute_diffusion_pseudotime(
 
 
 # ---------------------------------------------------------------------------
-# CSS entry point — called from data_prep.py when using CSS embedding from R
+# CSS entry point for CSS-integrated DPT-pseudotime label generation
+# — called from data_prep.py after generating  CSS embedding from R
 # ---------------------------------------------------------------------------
 
 def compute_dpt_from_css_embedding(

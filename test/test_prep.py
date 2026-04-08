@@ -477,7 +477,7 @@ def test_select_root_sets_iroot():
     sc.pp.scale(traj)
     sc.tl.pca(traj, n_comps=5)
     sc.pp.neighbors(traj, n_neighbors=5, n_pcs=5)
-    sc.tl.diffmap(traj, n_comps=5)
+    sc.tl.diffmap(traj, n_comps=11)
     traj = select_root(traj)
     assert "iroot" in traj.uns
     assert isinstance(traj.uns["iroot"], (int, np.integer))
@@ -490,7 +490,7 @@ def test_select_root_iroot_is_d5_cell():
     sc.pp.scale(traj)
     sc.tl.pca(traj, n_comps=5)
     sc.pp.neighbors(traj, n_neighbors=5, n_pcs=5)
-    sc.tl.diffmap(traj, n_comps=5)
+    sc.tl.diffmap(traj, n_comps=11)
     traj = select_root(traj)
     root_day = traj.obs["orig.ident"].iloc[traj.uns["iroot"]]
     assert root_day == "HB4_D5"
@@ -519,7 +519,7 @@ def _run_to_dpt(adata):
     sc.pp.scale(traj)
     sc.tl.pca(traj, n_comps=5)
     sc.pp.neighbors(traj, n_neighbors=5, n_pcs=5)
-    sc.tl.diffmap(traj, n_comps=5)
+    sc.tl.diffmap(traj, n_comps=11)   # ≥ n_dcs default (10) required by compute_dpt
     traj = select_root(traj)
     return compute_dpt(traj)
 
@@ -571,3 +571,196 @@ def test_assign_prolif_pseudotime_empty_prolif_returns_unchanged():
     empty_prolif = adata[:0].copy()
     result = assign_prolif_pseudotime(traj, empty_prolif)
     assert result.n_obs == 0
+
+
+# ---------------------------------------------------------------------------
+# CSS embedding integration — R↔Python boundary tests
+#
+# These tests guard against the failure modes introduced when css_pseudotime.R
+# produces css_embedding.csv and Python consumes it via
+# compute_dpt_from_css_embedding.  All use synthetic in-memory CSVs — no real
+# R output required.
+# ---------------------------------------------------------------------------
+
+from spatialmt.data_preparation.diffusion_trajectory import compute_dpt_from_css_embedding
+import io
+
+
+def _make_css_adata(n_cells=60, n_genes=80):
+    """Log-normalised AnnData whose cell barcodes match _make_css_df."""
+    rng = np.random.default_rng(1)
+    X = rng.random((n_cells, n_genes)).astype(np.float32) * 4.0
+    timepoints = ["HB4_D5", "HB4_D7", "HB4_D11", "HB4_D16", "HB4_D21", "HB4_D30"]
+    cell_types = ["Neurectoderm"] * (n_cells - 5) + ["Unknown proliferating cells"] * 5
+    obs = pd.DataFrame(
+        {
+            "orig.ident": [timepoints[i % len(timepoints)] for i in range(n_cells)],
+            "class3": cell_types,
+            "S.Score": rng.random(n_cells),
+            "G2M.Score": rng.random(n_cells),
+        },
+        index=[f"cell_{i}" for i in range(n_cells)],
+    )
+    var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes - 1)] + ["POU5F1"])
+    return sc.AnnData(X=X, obs=obs, var=var)
+
+
+def _make_css_df(n_cells=60, n_dims=10, cell_prefix="cell_"):
+    """Synthetic CSS embedding DataFrame matching _make_css_adata barcodes."""
+    rng = np.random.default_rng(2)
+    data = rng.standard_normal((n_cells, n_dims)).astype(np.float32)
+    index = [f"{cell_prefix}{i}" for i in range(n_cells)]
+    cols = [f"CSSPCACC_{d+1}" for d in range(n_dims)]
+    return pd.DataFrame(data, index=index, columns=cols)
+
+
+def _write_css_csv(tmp_path, df):
+    """Write CSS DataFrame to a temp CSV the way css_pseudotime.R does it."""
+    path = tmp_path / "css_embedding.csv"
+    # R write.csv uses row names; we mirror that with index=True
+    df.to_csv(path, index=True, index_label="cell_id")
+    return path
+
+
+# --- CSV format guard: cell_id written as first column by R write.csv ---
+
+def test_css_csv_cell_id_as_index(tmp_path):
+    """css_embedding.csv must parse correctly when cell_id is the first column."""
+    df = _make_css_df()
+    path = _write_css_csv(tmp_path, df)
+    loaded = pd.read_csv(path, index_col=0)
+    assert loaded.index[0] == "cell_0"
+    assert loaded.shape == (60, 10)
+
+
+def test_css_csv_no_extra_whitespace_in_column_names(tmp_path):
+    """Column names must not carry leading/trailing whitespace after round-trip."""
+    df = _make_css_df()
+    path = _write_css_csv(tmp_path, df)
+    loaded = pd.read_csv(path, index_col=0)
+    for col in loaded.columns:
+        assert col == col.strip(), f"Column '{col}' has surrounding whitespace"
+
+
+# --- Cell barcode alignment ---
+
+def test_css_full_overlap_runs(tmp_path):
+    """Happy path: all barcodes match → no warning, returns Series."""
+    adata = _make_css_adata()
+    df = _make_css_df()
+    path = _write_css_csv(tmp_path, df)
+    result = compute_dpt_from_css_embedding(adata, path, cell_type_key="class3", n_neighbors=5)
+    assert isinstance(result, pd.Series)
+    assert result.name == "pseudotime"
+
+
+def test_css_partial_overlap_warns(tmp_path):
+    """Barcodes present in adata but absent from CSS → UserWarning."""
+    adata = _make_css_adata(n_cells=60)
+    df = _make_css_df(n_cells=50)          # last 10 cells missing from CSS
+    path = _write_css_csv(tmp_path, df)
+    with pytest.warns(UserWarning, match="not found"):
+        compute_dpt_from_css_embedding(adata, path, cell_type_key="class3", n_neighbors=5)
+
+
+def test_css_partial_overlap_result_length(tmp_path):
+    """Result must contain only cells present in both adata and CSS."""
+    adata = _make_css_adata(n_cells=60)
+    df = _make_css_df(n_cells=50)
+    path = _write_css_csv(tmp_path, df)
+    with pytest.warns(UserWarning):
+        result = compute_dpt_from_css_embedding(adata, path, cell_type_key="class3", n_neighbors=5)
+    assert len(result) == 50
+
+
+def test_css_barcode_suffix_mismatch_raises(tmp_path):
+    """
+    Seurat barcodes often gain a '-1' suffix (e.g. 'cell_0-1' vs 'cell_0').
+    Zero shared cells should raise ValueError rather than silently return
+    empty pseudotime.
+    """
+    adata = _make_css_adata(n_cells=60)
+    df = _make_css_df(n_cells=60, cell_prefix="cell_")
+    # Simulate the R '-1' suffix that Seurat appends
+    df.index = [f"{b}-1" for b in df.index]
+    path = _write_css_csv(tmp_path, df)
+    with pytest.raises((ValueError, RuntimeError)):
+        compute_dpt_from_css_embedding(adata, path, cell_type_key="class3", n_neighbors=5)
+
+
+# --- Dimension robustness ---
+
+def test_css_arbitrary_dimension_count(tmp_path):
+    """Python must not hard-code 10 dims — works with any n_dims from R."""
+    adata = _make_css_adata()
+    for n_dims in (5, 10, 15):
+        df = _make_css_df(n_dims=n_dims)
+        path = _write_css_csv(tmp_path, df)
+        result = compute_dpt_from_css_embedding(adata, path, cell_type_key="class3", n_neighbors=5)
+        assert isinstance(result, pd.Series), f"Failed for n_dims={n_dims}"
+
+
+# --- Non-finite values in CSS embedding (R preprocessing divergence) ---
+
+def test_css_nan_in_embedding_raises(tmp_path):
+    """NaN in the CSS matrix (R numerical issue) must raise, not produce silent NaN pseudotime."""
+    adata = _make_css_adata()
+    df = _make_css_df()
+    df.iloc[0, 0] = float("nan")
+    path = _write_css_csv(tmp_path, df)
+    with pytest.raises((ValueError, RuntimeError, FloatingPointError)):
+        compute_dpt_from_css_embedding(adata, path, cell_type_key="class3", n_neighbors=5)
+
+
+def test_css_inf_in_embedding_raises(tmp_path):
+    """Inf in CSS matrix must raise, not silently propagate."""
+    adata = _make_css_adata()
+    df = _make_css_df()
+    df.iloc[5, 2] = float("inf")
+    path = _write_css_csv(tmp_path, df)
+    with pytest.raises((ValueError, RuntimeError, FloatingPointError)):
+        compute_dpt_from_css_embedding(adata, path, cell_type_key="class3", n_neighbors=5)
+
+
+# --- assign_prolif_pseudotime with pre-computed embedding (CSS path) ---
+
+def test_assign_prolif_pseudotime_with_embedding_no_pca_needed():
+    """
+    CSS path passes prolif_embedding directly — must not require varm['PCs'].
+    Regression test for the KeyError introduced before the fix.
+    """
+    adata = _make_diffusion_adata()
+    traj = _run_to_dpt(adata)
+    _, prolif = exclude_proliferating(adata)
+    # Deliberately delete PCs to confirm the embedding path does not fall back
+    if "PCs" in traj.varm:
+        del traj.varm["PCs"]
+    rng = np.random.default_rng(3)
+    n_dims = traj.obsm["X_pca"].shape[1]
+    fake_css = rng.standard_normal((prolif.n_obs, n_dims)).astype(np.float32)
+    result = assign_prolif_pseudotime(traj, prolif, prolif_embedding=fake_css)
+    assert not result.obs["pseudotime"].isna().any()
+
+
+def test_assign_prolif_pseudotime_embedding_values_in_unit_interval():
+    """Pseudotime assigned via embedding must remain in (0, 1]."""
+    adata = _make_diffusion_adata()
+    traj = _run_to_dpt(adata)
+    _, prolif = exclude_proliferating(adata)
+    rng = np.random.default_rng(4)
+    n_dims = traj.obsm["X_pca"].shape[1]
+    fake_css = rng.standard_normal((prolif.n_obs, n_dims)).astype(np.float32)
+    result = assign_prolif_pseudotime(traj, prolif, prolif_embedding=fake_css)
+    pt = result.obs["pseudotime"]
+    assert (pt > 0.0).all() and (pt <= 1.0).all()
+
+
+def test_assign_prolif_pseudotime_embedding_shape_mismatch_raises():
+    """Embedding with wrong n_dims must raise, not silently produce garbage."""
+    adata = _make_diffusion_adata()
+    traj = _run_to_dpt(adata)
+    _, prolif = exclude_proliferating(adata)
+    wrong_dims = traj.obsm["X_pca"].shape[1] + 99
+    bad_css = np.random.default_rng(5).standard_normal((prolif.n_obs, wrong_dims)).astype(np.float32)
+    with pytest.raises((ValueError, Exception)):
+        assign_prolif_pseudotime(traj, prolif, prolif_embedding=bad_css)
