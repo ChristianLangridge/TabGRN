@@ -72,7 +72,7 @@ The model operates on the Matrigel-only condition of the Jain et al. 2025 time-c
 ## 2. Directory Structure
 
 ```
-SMT-Pipeline/
+TabGRN/
 ├── pyproject.toml                      # Package registration — pip install -e .
 ├── smt_pipeline.yml                    # Conda environment
 ├── slurm_jobs.sh                       # Myriad HPC job scripts (all tiers)

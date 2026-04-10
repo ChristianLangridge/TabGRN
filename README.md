@@ -36,14 +36,14 @@ Integration pipeline for mechano-biological and spatial-transcriptomic datasets 
 ### 1. Clone the repository 
 
 ```bash
-git clone https://github.com/ChristianLangridge/LEMBAS-RNN-benchmark.git
-cd SMT-Pipeline
+git https://github.com/ChristianLangridge/TabGRN.git
+cd TabGRN
 ```
 
 ### 2. Create and activate a conda environment using smt_pipeline.yml 
 
 ```bash
-conda env create -f smt_pipeline.yml 
+conda env create -f TabGRN.yml 
 ```
 
 ---
