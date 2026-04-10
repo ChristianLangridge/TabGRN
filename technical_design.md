@@ -1072,6 +1072,29 @@ pytest tests/unit/ tests/smoke/ -v
 | DP8 | Compressed output (`np.savez_compressed`) | Minimal effort, ~50–70% disk savings |
 | DP9 | Lightweight memory pre-check | Prevents wasted time on OOM; warn if estimated peak > 80% available memory |
 
+### Baseline Evaluation Protocol (v1.2.0)
+
+**Decision:** Baseline models (XGBRegressor, LinearRegressor, XGBClassifier, NearestCentroid) were trained on the **full dataset with no day 11 holdout**. The data preparation pipeline (`prep.py`, `diffusion_trajectory.py`) processes all cells together — HVG selection and diffusion pseudotime computation are performed across all timepoints including day 11.
+
+**Rationale:** The purpose of the baselines is to establish a performance floor that justifies the development of TabGRN. Introducing a day 11 holdout at this stage would create two problems:
+
+1. *Pseudotime leakage.* Diffusion pseudotime is computed from the full cell graph. Day 11 cells participate in defining the diffusion manifold — their neighbours, eigenvectors, and DPT distances are co-determined with all other cells. Splitting post-hoc means the test labels were shaped by the test cells themselves.
+2. *HVG leakage.* Feature selection (2000 HVGs, seurat flavor) is performed on all cells. The chosen gene set is informed by day 11 variance.
+
+Training baselines on the full dataset **removes both leakage concerns** and gives each model the maximum possible information advantage. Any TabGRN improvement over these baselines is therefore a conservative lower bound — baselines had access to information TabGRN will not.
+
+**Future holdout implementation:** When TabGRN training begins, the holdout will be introduced correctly:
+- HVG selection on `collection_day != 11` cells only; gene list applied to all cells.
+- Diffusion pseudotime computed excluding day 11 cells; day 11 pseudotime assigned post-hoc via nearest neighbour in PCA space (reusing the `assign_prolif_pseudotime()` pattern already implemented in `diffusion_trajectory.py`).
+
+**Git checkpoint:** The commit at tag `baselines-complete` records the codebase state at the end of baseline evaluation, before holdout logic is introduced.
+
+| # | Decision | Rationale |
+|---|---|---|
+| BE1 | Baselines trained on full dataset, no holdout | Eliminates pseudotime and HVG leakage; gives baselines maximum information advantage; any TabGRN gain is a conservative lower bound |
+| BE2 | Day 11 holdout deferred to TabGRN training phase | Correct holdout requires leakage-free HVG selection and post-hoc pseudotime assignment — infrastructure not needed until TabGRN is implemented |
+| BE3 | `assign_prolif_pseudotime()` reused for day 11 holdout | Pattern already implemented and tested for proliferating cells; generalises directly to day 11 exclusion without new logic |
+
 ---
 
 *This document reflects all architectural decisions through the scope/baseline/data-prep review sessions (March 2026). The rotation scope (dual-head, regression baseline ladder, WLS/GLI3 perturbation validation) targets July 3rd.*
