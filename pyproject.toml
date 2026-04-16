@@ -13,6 +13,7 @@ requires-python = ">=3.10"
 dependencies = [
     "pandas",
     "numpy",
+    "psutil",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +22,6 @@ dev = [
     "scanpy",
     "anndata",
     "scipy",
-    "psutil",
 ]
 
 [tool.setuptools.packages.find]
