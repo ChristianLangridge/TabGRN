@@ -98,6 +98,7 @@ class Dirs:
     model_data = PROJECT_ROOT / "data" / "training_data"
     model_data_anndata = PROJECT_ROOT / "data" / "training_data" / "AnnData"
     model_data_ml = PROJECT_ROOT / "data" / "training_data" / "ML_data"
+    model_data_ml_tabgrn = PROJECT_ROOT / "data" / "training_data" / "ML_data_tabgrn"
     model_data_unstiched = PROJECT_ROOT / "data" / "training_data" / "matrix_bundle"
     
     # WLS validation data
