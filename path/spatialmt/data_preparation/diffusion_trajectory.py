@@ -3,20 +3,19 @@ Diffusion pseudotime computation for brain organoid scRNA-seq.
 
 Structured as a function module (mirrors prep.py) — called from data_prep.py.
 
+Entry point: compute_dpt_from_css_embedding
+--------------------------------------------
+Uses a CSS-PCA-CC embedding produced by css_pseudotime.R (simspec).
+Skips HVG selection, cell-cycle regression, scaling, and PCA — handled in R.
+
 Pipeline
 --------
 1.  Exclude "Unknown proliferating cells" (off-trajectory)
-2.  HVG selection (seurat, 2000 genes)
-3.  Regress out cell-cycle scores
-4.  Scale
-5.  PCA (10 components)
-6.  Neighbours (k=20, 10 PCs)
-7.  Diffusion map (15 components)
-8.  Root cell: highest POU5F1 in HB4_D5 (fallback: random D5 cell)
-9.  DPT
-10. Rank-transform → pseudotime ∈ (0, 1]
-11. Post-hoc pseudotime assignment for excluded proliferating cecompute_diffusion_pseudotimels (NN in PCA space)
-12. Save full h5ad to model_data_anndata
+2.  Inject CSS embedding as X_pca → neighbour graph (k=20) → diffusion map (15 components)
+3.  Root cell: highest POU5F1 in HB4_D5 (fallback: random D5 cell)
+4.  DPT → rank-transform → pseudotime ∈ (0, 1]
+5.  Post-hoc pseudotime for excluded proliferating cells (NN in CSS space)
+6.  Save full h5ad to model_data_anndata
 """
 
 import warnings
@@ -50,73 +49,8 @@ def exclude_proliferating(adata: sc.AnnData, cell_type_key: str = "class3") -> t
 
 
 # ---------------------------------------------------------------------------
-# Step 2-3 — HVG selection + cell-cycle regression
+# Steps 2-3 — neighbours, diffusion map, root selection
 # ---------------------------------------------------------------------------
-
-def select_hvgs(adata: sc.AnnData, n_top_genes: int = 2000) -> sc.AnnData:
-    sc.pp.highly_variable_genes(adata, n_top_genes=n_top_genes, flavor="seurat")
-    adata = adata[:, adata.var["highly_variable"]].copy()
-    print(f"HVG selection: retained {adata.n_vars} genes")
-    return adata
-
-
-def regress_cell_cycle(adata: sc.AnnData) -> sc.AnnData:
-    if "S.Score" in adata.obs.columns and "G2M.Score" in adata.obs.columns:
-        print("Regressing out cell-cycle scores...")
-        sc.pp.regress_out(adata, ["S.Score", "G2M.Score"])
-    else:
-        warnings.warn("S.Score / G2M.Score not found in obs — skipping cell-cycle regression")
-    return adata
-
-
-# ---------------------------------------------------------------------------
-# Steps 4-8 — scale, PCA, neighbours, diffusion map, root selection
-# ---------------------------------------------------------------------------
-
-def run_pca(adata: sc.AnnData, n_comps: int = 10) -> sc.AnnData:
-    sc.pp.scale(adata, max_value=10)
-    sc.tl.pca(adata, n_comps=n_comps, svd_solver="arpack")
-    print(f"PCA: {n_comps} components")
-    return adata
-
-
-def build_graph(
-    adata: sc.AnnData,
-    n_neighbors: int = 20,
-    n_pcs: int = 10,
-    use_harmony: bool = False,
-    batch_key: str = "orig.ident",
-) -> sc.AnnData:
-    """
-    Build neighbour graph and diffusion map.
-
-    Parameters
-    ----------
-    use_harmony : bool
-        If True, run Harmony batch correction on the PCA embedding before
-        building the neighbour graph. Requires harmonypy to be installed.
-        Use this to attempt recovery of anomalous timepoint pseudotime
-        (e.g. D21 batch effect). Compare outputs with and without to assess
-        whether correction resolves the discontinuity.
-    batch_key : str
-        obs column used as the Harmony batch variable. Default "orig.ident".
-    """
-    if use_harmony:
-        try:
-            sc.external.pp.harmony_integrate(adata, key=batch_key)
-            use_rep = "X_pca_harmony"
-            print(f"Harmony integration on '{batch_key}' complete")
-        except Exception as e:
-            warnings.warn(f"Harmony failed ({e}) — falling back to uncorrected PCA")
-            use_rep = "X_pca"
-    else:
-        use_rep = "X_pca"
-
-    sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs, use_rep=use_rep)
-    sc.tl.diffmap(adata, n_comps=15)
-    print(f"Neighbours: k={n_neighbors}, n_pcs={n_pcs}, use_rep={use_rep} | Diffusion map: 15 components")
-    return adata
-
 
 def select_root(adata: sc.AnnData, day_key: str = "orig.ident", root_day: str = "HB4_D5") -> sc.AnnData:
     """
@@ -263,20 +197,6 @@ def plot_pseudotime_vs_day(adata: sc.AnnData, fig_dir) -> None:
     print(f"Saved: {out}")
 
 
-def plot_pseudotime_umap(adata_traj: sc.AnnData, fig_dir) -> None:
-    import matplotlib.pyplot as plt
-
-    sc.tl.umap(adata_traj)
-    fig, ax = plt.subplots(figsize=(7, 6))
-    sc.pl.umap(adata_traj, color="pseudotime", ax=ax, show=False,
-               title="UMAP — rank-transformed pseudotime", color_map="viridis")
-    fig.tight_layout()
-    out = fig_dir / "pseudotime_umap.png"
-    fig.savefig(out, dpi=150)
-    plt.close(fig)
-    print(f"Saved: {out}")
-
-
 def plot_markers_over_pseudotime(adata_traj: sc.AnnData, fig_dir) -> None:
     import matplotlib.pyplot as plt
 
@@ -346,101 +266,6 @@ def plot_raw_vs_ranked(adata_traj: sc.AnnData, fig_dir) -> None:
     fig.savefig(out, dpi=150)
     plt.close(fig)
     print(f"Saved: {out}")
-
-
-# ---------------------------------------------------------------------------
-# No-integration DPT-pseudotime label generation — called from data_prep.py
-# ---------------------------------------------------------------------------
-
-def compute_diffusion_pseudotime(
-    adata: sc.AnnData,
-    cell_type_key: str = "class3",
-    n_top_genes: int = 2000,
-    n_pcs: int = 10,
-    n_neighbors: int = 20,
-    use_harmony: bool = False,
-) -> pd.Series:
-    """
-    Full diffusion pseudotime pipeline on a log-normalised AnnData.
-
-    The caller (data_prep.py) is responsible for loading the raw h5ad and
-    applying normalize_total + log1p before passing adata in here.
-
-    Parameters
-    ----------
-    adata : AnnData
-        Log-normalised AnnData (normalize_total + log1p already applied).
-    cell_type_key : str
-        obs column for cell type labels.
-    n_top_genes : int
-        HVGs to retain.
-    n_pcs : int
-        PCA components for neighbour graph and DPT.
-    n_neighbors : int
-        k for neighbour graph.
-
-    Returns
-    -------
-    pd.Series
-        Rank-transformed pseudotime ∈ (0, 1], indexed by cell barcode,
-        for all cells (including post-hoc assigned proliferating cells).
-        Named "pseudotime".
-    """
-    print(f"Input: {adata.n_obs} cells × {adata.n_vars} genes")
-    adata = adata.copy()
-
-    print("\n── Excluding proliferating cells ──")
-    adata_traj, adata_prolif = exclude_proliferating(adata, cell_type_key)
-
-    print("\n── HVG selection ──")
-    adata_traj = select_hvgs(adata_traj, n_top_genes)
-
-    print("\n── Cell-cycle regression ──")
-    adata_traj = regress_cell_cycle(adata_traj)
-
-    print("\n── PCA ──")
-    adata_traj = run_pca(adata_traj, n_pcs)
-
-    print("\n── Neighbour graph + diffusion map ──")
-    adata_traj = build_graph(adata_traj, n_neighbors, n_pcs, use_harmony=use_harmony)
-
-    print("\n── Root cell selection ──")
-    adata_traj = select_root(adata_traj)
-
-    print("\n── DPT + rank transform ──")
-    adata_traj = compute_dpt(adata_traj)
-
-    print("\n── Post-hoc pseudotime for proliferating cells ──")
-    adata_prolif = assign_prolif_pseudotime(adata_traj, adata_prolif)
-
-    print("\n── Saving full AnnData ──")
-    merge_and_save(adata_traj, adata_prolif, adata)
-
-    print("\n── Validation plots ──")
-    fig_dir = Dirs.results / "figures" / "pseudotime"
-    fig_dir.mkdir(parents=True, exist_ok=True)
-
-    full_pseudotime = pd.concat([
-        adata_traj.obs[["pseudotime"]],
-        adata_prolif.obs[["pseudotime"]],
-    ])
-    adata.obs["pseudotime"] = full_pseudotime["pseudotime"]
-    adata.obs["dpt_pseudotime"] = pd.concat([
-        adata_traj.obs[["dpt_pseudotime"]],
-        adata_prolif.obs[["dpt_pseudotime"]],
-    ])["dpt_pseudotime"]
-
-    plot_pseudotime_vs_day(adata, fig_dir)
-    plot_pseudotime_umap(adata_traj, fig_dir)
-    plot_markers_over_pseudotime(adata_traj, fig_dir)
-    plot_raw_vs_ranked(adata_traj, fig_dir)
-
-    print("\n── Per-day pseudotime summary ──")
-    summary = adata.obs.groupby("orig.ident")["pseudotime"].agg(["mean", "std", "min", "max"])
-    print(summary.to_string())
-
-    pseudotime = adata.obs["pseudotime"].rename("rank-transformed-pseudotime")
-    return pseudotime
 
 
 # ---------------------------------------------------------------------------

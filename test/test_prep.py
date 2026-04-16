@@ -14,11 +14,9 @@ from spatialmt.data_preparation.prep import (
     extract_cell_labels,
     extract_gene_labels,
     extract_cell_type_labels,
-    generate_pseudotime_labels,
     select_highly_variable_genes,
     prepare_dataset,
 )
-from spatialmt.data_preparation.diffusion_trajectory import compute_diffusion_pseudotime
 
 
 # ---------------------------------------------------------------------------
@@ -274,37 +272,10 @@ def test_pseudotime_length_preserved():
 # the diffusion pseudotime function is available.
 # ---------------------------------------------------------------------------
 
-def _diffusion_pseudotime_from_orig_ident(orig_ident: pd.Series) -> pd.Series:
-    """
-    Wrap compute_diffusion_pseudotime to match the scaffold pseudotime
-    contract (accepts orig_ident Series, returns named pseudotime Series).
-    Builds a minimal synthetic AnnData from the orig_ident index.
-    """
-    import scanpy as sc
-    n = len(orig_ident)
-    n_genes = 50
-    rng = np.random.default_rng(42)
-    X = rng.random((n, n_genes)).astype(np.float32) * 4.0
-    obs = pd.DataFrame(
-        {
-            "orig.ident": orig_ident.values,
-            "class3": ["Neurectoderm"] * n,
-            "S.Score": rng.random(n),
-            "G2M.Score": rng.random(n),
-        },
-        index=[f"cell_{i}" for i in range(n)],
-    )
-    var = pd.DataFrame(index=[f"gene_{i}" for i in range(n_genes)])
-    adata = sc.AnnData(X=X, obs=obs, var=var)
-    return compute_diffusion_pseudotime(adata, cell_type_key="class3", n_top_genes=20, n_pcs=5, n_neighbors=5)
-
-
-@pytest.fixture(params=["scaffold", "diffusion"])
+@pytest.fixture(params=["scaffold"])
 def pseudotime_fn(request):
     if request.param == "scaffold":
         return generate_pseudotime_labels
-    if request.param == "diffusion":
-        return _diffusion_pseudotime_from_orig_ident
 
 
 def test_pseudotime_contract_output_is_series(pseudotime_fn):
@@ -380,8 +351,6 @@ def test_memory_feasibility_estimation():
 import scanpy as sc
 from spatialmt.data_preparation.diffusion_trajectory import (
     exclude_proliferating,
-    select_hvgs,
-    regress_cell_cycle,
     select_root,
     compute_dpt,
     assign_prolif_pseudotime,
@@ -431,49 +400,13 @@ def test_exclude_proliferating_cell_ids_partition():
     assert all_ids == set(adata.obs_names)
 
 
-# --- select_hvgs ---
-
-def test_select_hvgs_gene_count():
-    adata = _make_diffusion_adata()
-    traj, _ = exclude_proliferating(adata)
-    result = select_hvgs(traj, n_top_genes=20)
-    assert result.n_vars == 20
-
-
-def test_select_hvgs_preserves_cell_count():
-    adata = _make_diffusion_adata()
-    traj, _ = exclude_proliferating(adata)
-    n_before = traj.n_obs
-    result = select_hvgs(traj, n_top_genes=20)
-    assert result.n_obs == n_before
-
-
-# --- regress_cell_cycle ---
-
-def test_regress_cell_cycle_runs_with_scores():
-    adata = _make_diffusion_adata()
-    traj, _ = exclude_proliferating(adata)
-    traj = select_hvgs(traj, n_top_genes=20)
-    sc.pp.scale(traj)
-    # Should not raise
-    regress_cell_cycle(traj)
-
-
-def test_regress_cell_cycle_warns_without_scores():
-    adata = _make_diffusion_adata()
-    traj, _ = exclude_proliferating(adata)
-    traj = select_hvgs(traj, n_top_genes=20)
-    traj.obs.drop(columns=["S.Score", "G2M.Score"], inplace=True)
-    with pytest.warns(UserWarning):
-        regress_cell_cycle(traj)
-
-
 # --- select_root ---
 
 def test_select_root_sets_iroot():
     adata = _make_diffusion_adata()
     traj, _ = exclude_proliferating(adata)
-    traj = select_hvgs(traj, n_top_genes=20)
+    sc.pp.highly_variable_genes(traj, n_top_genes=20, flavor="seurat")
+    traj = traj[:, traj.var["highly_variable"]].copy()
     sc.pp.scale(traj)
     sc.tl.pca(traj, n_comps=5)
     sc.pp.neighbors(traj, n_neighbors=5, n_pcs=5)
@@ -486,7 +419,8 @@ def test_select_root_sets_iroot():
 def test_select_root_iroot_is_d5_cell():
     adata = _make_diffusion_adata()
     traj, _ = exclude_proliferating(adata)
-    traj = select_hvgs(traj, n_top_genes=20)
+    sc.pp.highly_variable_genes(traj, n_top_genes=20, flavor="seurat")
+    traj = traj[:, traj.var["highly_variable"]].copy()
     sc.pp.scale(traj)
     sc.tl.pca(traj, n_comps=5)
     sc.pp.neighbors(traj, n_neighbors=5, n_pcs=5)
@@ -501,7 +435,8 @@ def test_select_root_fallback_warns_without_pou5f1():
     traj, _ = exclude_proliferating(adata)
     # Replace POU5F1 gene name so it's absent
     traj.var.index = [f"gene_{i}" for i in range(traj.n_vars)]
-    traj = select_hvgs(traj, n_top_genes=20)
+    sc.pp.highly_variable_genes(traj, n_top_genes=20, flavor="seurat")
+    traj = traj[:, traj.var["highly_variable"]].copy()
     sc.pp.scale(traj)
     sc.tl.pca(traj, n_comps=5)
     sc.pp.neighbors(traj, n_neighbors=5, n_pcs=5)
@@ -515,7 +450,8 @@ def test_select_root_fallback_warns_without_pou5f1():
 
 def _run_to_dpt(adata):
     traj, _ = exclude_proliferating(adata)
-    traj = select_hvgs(traj, n_top_genes=20)
+    sc.pp.highly_variable_genes(traj, n_top_genes=20, flavor="seurat")
+    traj = traj[:, traj.var["highly_variable"]].copy()
     sc.pp.scale(traj)
     sc.tl.pca(traj, n_comps=5)
     sc.pp.neighbors(traj, n_neighbors=5, n_pcs=5)
