@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from spatialmt.config.experiment import ExperimentConfig
-from spatialmt.data_preparation2.dataset import ProcessedDataset
+from spatialmt.data_preparation.dataset import ProcessedDataset
 
 K = 8
 N_CELLS = 100

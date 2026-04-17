@@ -1,5 +1,5 @@
 """
-spatialmt.data_preparation2.dataset — ProcessedDataset
+spatialmt.data_preparation.dataset — ProcessedDataset
 
 Immutable, schema-validated container for one experiment's training data.
 Every downstream component receives this object; raw files are never accessed

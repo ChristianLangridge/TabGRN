@@ -10,7 +10,7 @@ import pytest
 import anndata as ad
 
 from spatialmt.config.experiment import DataConfig
-from spatialmt.data_preparation2.dataset import ProcessedDataset
+from spatialmt.data_preparation.dataset import ProcessedDataset
 
 K = 8
 TIMEPOINTS = ["HB4_D5", "HB4_D7", "HB4_D11", "HB4_D16", "HB4_D21", "HB4_D30"]

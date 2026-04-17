@@ -1,5 +1,5 @@
 """
-Unit tests for spatialmt.data_preparation2.dataset.ProcessedDataset.
+Unit tests for spatialmt.data_preparation.dataset.ProcessedDataset.
 
 Tests are organised into:
   - Construction (valid dataset builds without error)
@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 
 from spatialmt.config.experiment import ConfigurationError, DataConfig
-from spatialmt.data_preparation2.dataset import ProcessedDataset
+from spatialmt.data_preparation.dataset import ProcessedDataset
 
 K = 8
 
