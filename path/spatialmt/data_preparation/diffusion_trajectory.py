@@ -345,30 +345,9 @@ def compute_dpt_from_css_embedding(
     prolif_css = css_df.loc[adata_prolif.obs_names].values.astype(np.float32) if adata_prolif.n_obs > 0 else None
     adata_prolif = assign_prolif_pseudotime(adata_traj, adata_prolif, prolif_embedding=prolif_css)
 
-    print("\n── Saving full AnnData ──")
-    merge_and_save(adata_traj, adata_prolif, adata)
-
-    print("\n── Validation plots ──")
-    fig_dir = Dirs.results / "figures" / "pseudotime_css"
-    fig_dir.mkdir(parents=True, exist_ok=True)
-
     full_pseudotime = pd.concat([
         adata_traj.obs[["pseudotime"]],
         adata_prolif.obs[["pseudotime"]],
     ])
-    adata.obs["pseudotime"]     = full_pseudotime["pseudotime"]
-    adata.obs["dpt_pseudotime"] = pd.concat([
-        adata_traj.obs[["dpt_pseudotime"]],
-        adata_prolif.obs[["dpt_pseudotime"]],
-    ])["dpt_pseudotime"]
-
-    plot_pseudotime_vs_day(adata, fig_dir)
-    plot_markers_over_pseudotime(adata_traj, fig_dir)
-    plot_raw_vs_ranked(adata_traj, fig_dir)
-
-    print("\n── Per-day pseudotime summary ──")
-    summary = adata.obs.groupby("orig.ident")["pseudotime"].agg(["mean", "std", "min", "max"])
-    print(summary.to_string())
-
-    pseudotime = adata.obs["pseudotime"].rename("rank-transformed-pseudotime")
+    pseudotime = full_pseudotime["pseudotime"].rename("rank-transformed-pseudotime")
     return pseudotime

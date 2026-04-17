@@ -22,6 +22,7 @@ dev = [
     "scanpy",
     "anndata",
     "scipy",
+    "scikit-misc",
 ]
 
 [tool.setuptools.packages.find]

@@ -100,6 +100,9 @@ def select_highly_variable_genes(
         warnings.warn(f"flavor='seurat_v3' expects raw counts but X.max()={xmax:.1f}")
     sc.pp.highly_variable_genes(adata, n_top_genes=n_top_genes, flavor=flavor)
     adata = adata[:, adata.var["highly_variable"]]
+    # Hard-cap: scanpy can return slightly more than n_top_genes when scores tie
+    if adata.n_vars > n_top_genes:
+        adata = adata[:, :n_top_genes].copy()
     return adata
 
 

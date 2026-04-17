@@ -34,11 +34,26 @@ if __name__ == "__main__":
     y = dataset.y
 
     # Diffusion pseudotime using CSS embedding from css_pseudotime.R
+    from spatialmt.data_preparation.diffusion_trajectory import (
+        merge_and_save, plot_pseudotime_vs_day, plot_markers_over_pseudotime, plot_raw_vs_ranked,
+        exclude_proliferating,
+    )
     pseudotime = compute_dpt_from_css_embedding(
         adata,
         css_embedding_path=Paths.css_embedding,
         cell_type_key="class3",
     )
+
+    # Persist pseudotime into the full AnnData and save
+    adata_traj, adata_prolif = exclude_proliferating(adata, cell_type_key="class3")
+    merge_and_save(adata_traj, adata_prolif, adata)
+
+    fig_dir = Dirs.results / "figures" / "pseudotime_css"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    plot_pseudotime_vs_day(adata, fig_dir)
+    plot_markers_over_pseudotime(adata_traj, fig_dir)
+    plot_raw_vs_ranked(adata_traj, fig_dir)
+
     pseudotime = pseudotime.reindex(cell_labels)
 
     print(f"\nExpression matrix : {X.shape}  (cells x HVGs)")
