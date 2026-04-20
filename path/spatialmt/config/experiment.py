@@ -94,14 +94,67 @@ class ModelConfig:
 
 @dataclass
 class ExplainabilityConfig:
+    # --- SHAP ---
+    # GradientSHAP: model-aware, uses gradients — fast cross-validation of
+    # AttentionScorer findings at the node (gene) level.
     shap_background_size: int = 100
     shap_background_seed: int = 42
+
+    # --- Biological plausibility gate ---
+    # Column attention scores for these genes must rank in the top quartile
+    # of their row after training, or bio_plausibility_passed is set False.
     bio_plausibility_required: tuple[str, ...] = ("SOX2",)
+
+    # --- Integrated Hessians ---
+    # Pairwise gene interaction matrix (n_genes, n_genes), task-coupled and
+    # developmental-state-specific. Run separately per prediction head and
+    # per cell state to produce multiple IH matrices. Captures higher-order
+    # feature interactions beyond what attention weights expose directly.
+    ih_n_steps: int = 50
+    ih_baseline_strategy: str = "day5_mean"   # "zero" | "dataset_mean" | "day5_mean"
+    ih_top_k_edges: int = 500                 # threshold before biological validation
+
+
+@dataclass
+class AblationTarget:
+    """Specification for a single in-silico gene ablation experiment.
+
+    Ablation variants (composable)
+    ──────────────────────────────
+    zero_in_query=True only
+        Cell-autonomous contribution — query cell KO in wild-type neighbourhood.
+
+    zero_in_context_states=None (all states)
+        Population-wide KO approximation — comparable to real KO dataset.
+        Concordance with wet-lab KO → gene effect is cell-autonomous.
+        Discordance → effect is non-cell-autonomous / trajectory-level.
+
+    zero_in_context_states=["neural_progenitor"]
+        State-specific non-cell-autonomous contribution — does this gene in
+        progenitor anchors inform downstream cell predictions specifically.
+
+    zero_in_context_pseudotime_below / _above
+        Temporal window ablation — is the gene's contextual effect gated to
+        early or late trajectory positions. Uniquely enabled by ICL design.
+
+    Combining all fields
+        Full ablation within a lineage — approximates lineage-restricted KO.
+    """
+    gene: str
+    zero_in_query: bool = True
+    zero_in_context_states: list[str] | None = None   # None = all context states
+    zero_in_context_pseudotime_below: float | None = None
+    zero_in_context_pseudotime_above: float | None = None
 
 
 @dataclass
 class PerturbationConfig:
-    perturbation_mask: dict[str, float] = field(default_factory=lambda: {"WLS": 0.0})
+    # List of ablation experiments to run post-training.
+    # Default: single cell-autonomous WLS ablation.
+    ablations: list[AblationTarget] = field(default_factory=lambda: [
+        AblationTarget(gene="WLS", zero_in_query=True)
+    ])
+    # Thresholds for calling a significant perturbation effect
     pseudotime_delta_threshold: float = -0.05
     attention_drop_fraction: float = 0.1
     composition_shift_threshold: float = 0.05

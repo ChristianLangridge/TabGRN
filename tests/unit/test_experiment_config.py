@@ -172,9 +172,14 @@ def test_explainability_config_defaults():
 # PerturbationConfig
 # ---------------------------------------------------------------------------
 
-def test_perturbation_config_wls_mask():
+def test_perturbation_config_default_ablation():
+    """Default ablation target is a cell-autonomous WLS KO in the query cell."""
     cfg = ExperimentConfig.rotation_finetune()
-    assert cfg.perturbation.perturbation_mask == {"WLS": 0.0}
+    assert len(cfg.perturbation.ablations) == 1
+    ablation = cfg.perturbation.ablations[0]
+    assert ablation.gene == "WLS"
+    assert ablation.zero_in_query is True
+    assert ablation.zero_in_context_states is None
 
 
 def test_perturbation_config_thresholds():
