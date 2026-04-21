@@ -10,22 +10,30 @@ for the two feature-interaction stages:
                   Distribution-aware column-wise embedding via shared Set
                   Transformer (ISAB). Processes each gene independently across
                   all cells in the ICL window.
-                  Input:  (B, n_cells, n_genes)  + y_train (B, n_anchors)
+                  Input:  (B, n_cells, n_genes)
                   Output: (B, n_cells, seq_len, embed_dim)
+                  Note: target_aware=False — y_train arg is accepted but ignored.
 
   row_interactor  tabicl.model.interaction.RowInteraction
                   Transformer encoder with rotary positional encoding over the
                   feature (gene) dimension within each cell.
                   Input:  (B, n_cells, seq_len, embed_dim)
-                  Output: (B, n_cells, d_model)   where d_model = num_cls × embed_dim
+                  Output: (B, n_cells, d_model)  where d_model = num_cls × embed_dim
 
 Custom regression head stack (not present in TabICLv2)
 ------------------------------------------------------
-  LabelInjector   Adds pseudotime + soft_label projections to anchor rows
-                  only. Query row is never modified (no label leakage).
+  AnchorLabelEmbedder
+                  Adds pseudotime + soft_label projections to anchor rows only.
+                  Query row is never modified (no label leakage).
+                  Injection deferred to post-row-interaction to preserve clean
+                  feature-feature attention for GRN extraction via AttentionScorer.
 
-  ICLAttention    Query (last row) cross-attends all anchor representations.
-                  Output: (B, d_model)
+  tf_icl          tabicl.model.encoders.Encoder — the pretrained ICL transformer
+                  from TabICLv2's icl_predictor.tf_icl sub-module.
+                  Runs bidirectional attention within anchors; query position
+                  attends to anchor context only (train_size masking).
+                  Input:  (B, n_cells, d_model), train_size=n_anchors
+                  Output: (B, n_cells, d_model)  → we take [:, -1, :] (query row)
 
   SharedTrunk     LayerNorm → Linear → GELU → Linear.
 
@@ -43,14 +51,16 @@ Parameter groups (for torch.optim)
 -----------------------------------
   col   col_embedder     lr_col = 1e-5  [pretrained; frozen for warmup_col_steps]
   row   row_interactor   lr_row = 1e-4  [pretrained]
-  icl   icl_attention    lr_icl = 5e-5  [pretrained; frozen for warmup_icl_steps]
-  head  label_injector + shared_trunk + pseudotime_head + composition_head
+  icl   tf_icl           lr_icl = 5e-5  [pretrained; frozen for warmup_icl_steps]
+  head  anchor_label_embedder + shared_trunk + pseudotime_head + composition_head
                          lr_head = 1e-3 [always reinitialised]
 
 Checkpoint loading
 ------------------
-Load a pretrained TabICL checkpoint with strict=False — col_embedder and
-row_interactor weight names match; head layers are skipped automatically.
+Load a pretrained TabICL checkpoint with strict=False:
+  - col_embedder.* and row_interactor.* keys match directly.
+  - icl_predictor.tf_icl.* keys are remapped to tf_icl.* for our tf_icl Encoder.
+  - Head layers are absent from the checkpoint and are skipped automatically.
 """
 from __future__ import annotations
 
@@ -60,13 +70,29 @@ import torch.nn.functional as F
 
 from tabicl.model.embedding import ColEmbedding
 from tabicl.model.interaction import RowInteraction
+from tabicl.model.encoders import Encoder
 
 
 # ---------------------------------------------------------------------------
-# LabelInjector
+# Module-level helpers
 # ---------------------------------------------------------------------------
 
-class LabelInjector(nn.Module):
+def _init_linear(layer: nn.Linear, weight_std: float = 0.01, bias_value: float = 0.0) -> None:
+    """Initialise a Linear layer with small-normal weights and a constant bias.
+
+    Used by PseudotimeHead and CompositionHead to keep both output heads at a
+    near-uniform prior at the start of training, avoiding premature gradient
+    dominance by either task.
+    """
+    nn.init.normal_(layer.weight, std=weight_std)
+    nn.init.constant_(layer.bias, bias_value)
+
+
+# ---------------------------------------------------------------------------
+# AnchorLabelEmbedder
+# ---------------------------------------------------------------------------
+
+class AnchorLabelEmbedder(nn.Module):
     """Injects anchor pseudotime and soft_labels into the cell representation.
 
     Anchor rows (positions 0 … n_anchors-1) receive the summed projection of
@@ -102,30 +128,6 @@ class LabelInjector(nn.Module):
         injection = torch.cat([label_emb, zero_pad], dim=1)     # (B, n_cells, d_model)
 
         return x + injection   # query rows receive +0 exactly — no label leakage
-
-
-# ---------------------------------------------------------------------------
-# ICLAttention
-# ---------------------------------------------------------------------------
-
-class ICLAttention(nn.Module):
-    """Query cross-attends all anchor representations.
-
-    The query cell is at the last position; all preceding positions are anchors.
-
-    Input:  (B, n_cells, d_model)
-    Output: (B, d_model)
-    """
-
-    def __init__(self, d_model: int, n_heads: int) -> None:
-        super().__init__()
-        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        query   = x[:, -1:, :]  # (B, 1, d_model)
-        anchors = x[:, :-1, :]  # (B, n_anchors, d_model)
-        out, _  = self.attn(query, anchors, anchors)
-        return out.squeeze(1)   # (B, d_model)
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +168,7 @@ class PseudotimeHead(nn.Module):
     def __init__(self, d_model: int, init_bias: float = 0.5, init_std: float = 0.01) -> None:
         super().__init__()
         self.linear = nn.Linear(d_model, 1)
-        nn.init.normal_(self.linear.weight, std=init_std)
-        nn.init.constant_(self.linear.bias, init_bias)
+        _init_linear(self.linear, weight_std=init_std, bias_value=init_bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(self.linear(x).squeeze(-1))
@@ -182,13 +183,16 @@ class CompositionHead(nn.Module):
 
     Input:  (B, d_model)
     Output: (B, K)  rows sum to 1.0
+
+    Loss: KL(target ∥ pred) where target is the distance-to-centroid softmax
+    from ProcessedDataset. Dirichlet NLL planned for a later phase once the
+    rotation fine-tune baseline is established (TDD v1.3.0 interim).
     """
 
     def __init__(self, d_model: int, k: int, init_std: float = 0.01) -> None:
         super().__init__()
         self.linear = nn.Linear(d_model, k)
-        nn.init.normal_(self.linear.weight, std=init_std)
-        nn.init.zeros_(self.linear.bias)
+        _init_linear(self.linear, weight_std=init_std, bias_value=0.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return torch.softmax(self.linear(x), dim=-1)
@@ -211,9 +215,9 @@ class TabICLRegressor(nn.Module):
     embed_dim : int
         Token embedding dimension inside ColEmbedding / RowInteraction.
     n_heads : int
-        Number of attention heads in backbone and ICLAttention.
+        Number of attention heads in backbone and tf_icl.
     n_layers : int
-        Number of transformer blocks in ColEmbedding and RowInteraction.
+        Number of transformer blocks in ColEmbedding, RowInteraction, and tf_icl.
     k : int
         Number of cell states (DataConfig.n_cell_states).
     num_cls : int
@@ -252,16 +256,20 @@ class TabICLRegressor(nn.Module):
             num_cls=num_cls,
         )
 
+        # Pretrained ICL transformer from TabICLv2's icl_predictor.tf_icl.
+        # Loaded via load_backbone with key remapping icl_predictor.tf_icl.* → tf_icl.*
+        self.tf_icl = Encoder(
+            num_blocks=n_layers,
+            d_model=d_model,
+            nhead=n_heads,
+            dim_feedforward=d_model * 2,
+        )
+
         # --- Custom regression head stack (always reinitialised) ---
-        self.label_injector   = LabelInjector(d_model=d_model, k=k)
-        self.icl_attention    = ICLAttention(d_model=d_model, n_heads=n_heads)
+        self.anchor_label_embedder   = AnchorLabelEmbedder(d_model=d_model, k=k)
         self.shared_trunk     = SharedTrunk(d_model=d_model)
         self.pseudotime_head  = PseudotimeHead(d_model=d_model)
         self.composition_head = CompositionHead(d_model=d_model, k=k)
-
-        self._embed_dim = embed_dim
-        self._d_model   = d_model
-        self._k         = k
 
     def forward(self, batch: "ICLBatch") -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -280,29 +288,40 @@ class TabICLRegressor(nn.Module):
         pt_pred   : (B,)   pseudotime predictions ∈ (0, 1)
         comp_pred : (B, K) composition predictions, rows sum to 1.0
         """
+        n_anchors = batch.context_expression.shape[1]
+
         # 1. Stack query after anchors → (B, n_cells, n_genes)
         query_expr = batch.query_expression.unsqueeze(1)
         all_expr   = torch.cat([batch.context_expression, query_expr], dim=1)
 
-        # 2. Column-wise embedding — anchor pseudotime passed as y_train so
-        #    col_embedder can distinguish anchor vs query positions internally.
-        #    target_aware=False so y_train values are not used for conditioning.
+        # 2. Column-wise embedding — target_aware=False so y_train values are
+        #    never used for class conditioning. However ColEmbedding always reads
+        #    y_train.shape[1] to determine train_size for inducing-point attention
+        #    masking. We pass context_pseudotime so shape[1] == n_anchors.
         emb = self.col_embedder(all_expr, batch.context_pseudotime)
         # emb: (B, n_cells, seq_len, embed_dim)
 
-        # 3. Row interaction — transformer over gene dimension within each cell
-        x = self.row_interactor(emb)
+        # 3. Row interaction — transformer over gene dimension within each cell.
+        #    RowInteraction._train_forward does an in-place write to replace the
+        #    reserved CLS-token slots with learned CLS embeddings.  Passing a
+        #    clone ensures that write lands on the clone's version counter, not
+        #    on emb's, so autograd can still backprop through col_embedder.
+        x = self.row_interactor(emb.clone())
         # x: (B, n_cells, d_model)
 
-        # 4. Label injection — add pseudotime + soft_labels to anchor rows only
-        x = self.label_injector(
+        # 4. Label injection — add pseudotime + soft_labels to anchor rows only.
+        #    Deferred to post-row-interaction so col_embedder sees clean gene
+        #    features without label contamination (preserves GRN signal quality).
+        x = self.anchor_label_embedder(
             x,
             anchor_pseudotime=batch.context_pseudotime,
             anchor_soft_labels=batch.context_soft_labels,
         )
 
-        # 5. ICL attention — query cross-attends all anchors jointly
-        x = self.icl_attention(x)    # (B, d_model)
+        # 5. ICL transformer — pretrained Encoder from TabICLv2's icl_predictor.
+        #    train_size masking: query attends to anchors only (ICL protocol).
+        x = self.tf_icl(x, train_size=n_anchors)  # (B, n_cells, d_model)
+        x = x[:, -1, :]                            # query row → (B, d_model)
 
         # 6. Shared trunk
         x = self.shared_trunk(x)     # (B, d_model)
@@ -314,7 +333,7 @@ class TabICLRegressor(nn.Module):
         return pt_pred, comp_pred
 
     def load_backbone(self, checkpoint_path: str, strict: bool = False) -> None:
-        """Load pretrained TabICLv2 weights into col_embedder and row_interactor.
+        """Load pretrained TabICLv2 weights into col_embedder, row_interactor, and tf_icl.
 
         Parameters
         ----------
@@ -323,15 +342,25 @@ class TabICLRegressor(nn.Module):
         strict : bool
             Passed to load_state_dict. False (default) skips head layers that
             are absent from the checkpoint.
+
+        Key remapping
+        -------------
+        col_embedder.*           → col_embedder.*       (direct match)
+        row_interactor.*         → row_interactor.*     (direct match)
+        icl_predictor.tf_icl.*   → tf_icl.*             (strip icl_predictor. prefix)
         """
         state = torch.load(checkpoint_path, map_location="cpu")
         if "state_dict" in state:
             state = state["state_dict"]
-        # Filter to backbone keys only
-        backbone_state = {
-            k: v for k, v in state.items()
-            if k.startswith("col_embedder.") or k.startswith("row_interactor.")
-        }
+
+        backbone_state: dict = {}
+        for k, v in state.items():
+            if k.startswith("col_embedder.") or k.startswith("row_interactor."):
+                backbone_state[k] = v
+            elif k.startswith("icl_predictor.tf_icl."):
+                # Remap pretrained ICL transformer into our tf_icl sub-module
+                backbone_state[k[len("icl_predictor."):]] = v
+
         self.load_state_dict(backbone_state, strict=strict)
 
     def parameter_groups(self) -> list[dict]:
@@ -355,13 +384,13 @@ class TabICLRegressor(nn.Module):
             },
             {
                 "name":   "icl",
-                "params": list(self.icl_attention.parameters()),
+                "params": list(self.tf_icl.parameters()),
                 "lr":     cfg.lr_icl,
             },
             {
                 "name":   "head",
                 "params": (
-                    list(self.label_injector.parameters())
+                    list(self.anchor_label_embedder.parameters())
                     + list(self.shared_trunk.parameters())
                     + list(self.pseudotime_head.parameters())
                     + list(self.composition_head.parameters())
@@ -387,6 +416,17 @@ class AttentionScorer:
     This is complementary to (not a replacement for) Integrated Hessians — the
     ISAB weights are not directly accessible as a clean gene×gene matrix, but the
     cosine similarity of final gene embeddings captures effective co-attention.
+
+    Warning
+    -------
+    With TabICLv2's feature grouping enabled (feature_group != False), each token
+    position j represents a linear projection of a triplet of genes (j, j+1, j+2)
+    mod n_genes (circular permutation). In that setting cosine similarity at
+    positions (i, j) reflects triplet-context similarity, not atomic gene-gene
+    similarity. Our model uses feature_group=False (default), so each token maps
+    1:1 to one gene — this warning applies if you enable feature grouping downstream.
+    For publication-grade GRN edges use Integrated Gradients (primary) and
+    in-silico perturbation (causal validation); this scorer is a fast diagnostic.
 
     Usage
     -----

@@ -11,9 +11,12 @@ Backbone (pretrained TabICLv2 imports)
                    (B, n_cells, seq_len, embed_dim) → (B, n_cells, d_model)
                    d_model = num_cls × embed_dim
 
+  tf_icl           tabicl.model.encoders.Encoder  (pretrained ICL transformer)
+                   (B, n_cells, d_model) → (B, n_cells, d_model)
+                   Query position attends to anchors only (train_size masking).
+
 Custom head stack
-  LabelInjector    (B, n_cells, d_model) → same  [anchor rows only]
-  ICLAttention     (B, n_cells, d_model) → (B, d_model)
+  AnchorLabelEmbedder    (B, n_cells, d_model) → same  [anchor rows only]
   SharedTrunk      (B, d_model) → (B, d_model)
   PseudotimeHead   (B, d_model) → (B,)    sigmoid ∈ (0, 1)
   CompositionHead  (B, d_model) → (B, K)  softmax, rows sum to 1.0
@@ -28,7 +31,6 @@ Parameter groups
 from __future__ import annotations
 
 import pytest
-import numpy as np
 import torch
 
 # ---------------------------------------------------------------------------
@@ -111,8 +113,7 @@ def test_import_attention_scorer():
 
 def test_import_custom_sub_modules():
     from spatialmt.model.tabicl import (
-        LabelInjector,
-        ICLAttention,
+        AnchorLabelEmbedder,
         SharedTrunk,
         PseudotimeHead,
         CompositionHead,
@@ -123,8 +124,10 @@ def test_import_tabicl_backbone_classes():
     """TabICLv2 backbone classes must be importable from the tabicl package."""
     from tabicl.model.embedding import ColEmbedding
     from tabicl.model.interaction import RowInteraction
+    from tabicl.model.encoders import Encoder
     assert ColEmbedding is not None
     assert RowInteraction is not None
+    assert Encoder is not None
 
 
 # ---------------------------------------------------------------------------
@@ -151,18 +154,19 @@ def test_model_has_row_interactor():
     assert isinstance(model.row_interactor, RowInteraction)
 
 
-def test_model_has_label_injector():
-    from spatialmt.model.tabicl import LabelInjector
+def test_model_has_tf_icl():
+    """tf_icl must be a tabicl.model.encoders.Encoder (pretrained ICL transformer)."""
+    from tabicl.model.encoders import Encoder
     model = _make_model()
-    assert hasattr(model, "label_injector")
-    assert isinstance(model.label_injector, LabelInjector)
+    assert hasattr(model, "tf_icl")
+    assert isinstance(model.tf_icl, Encoder)
 
 
-def test_model_has_icl_attention():
-    from spatialmt.model.tabicl import ICLAttention
+def test_model_has_anchor_label_embedder():
+    from spatialmt.model.tabicl import AnchorLabelEmbedder
     model = _make_model()
-    assert hasattr(model, "icl_attention")
-    assert isinstance(model.icl_attention, ICLAttention)
+    assert hasattr(model, "anchor_label_embedder")
+    assert isinstance(model.anchor_label_embedder, AnchorLabelEmbedder)
 
 
 def test_model_has_shared_trunk():
@@ -184,6 +188,12 @@ def test_model_has_composition_head():
     model = _make_model()
     assert hasattr(model, "composition_head")
     assert isinstance(model.composition_head, CompositionHead)
+
+
+def test_model_has_no_icl_attention():
+    """ICLAttention removed — replaced by pretrained tf_icl Encoder."""
+    model = _make_model()
+    assert not hasattr(model, "icl_attention")
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +254,14 @@ def test_forward_composition_rows_sum_to_one():
     assert torch.allclose(row_sums, torch.ones(B), atol=1e-5)
 
 
+def test_forward_composition_nonnegative():
+    """softmax output is always ≥ 0."""
+    model = _make_model()
+    batch = _make_batch()
+    _, comp_pred = model(batch)
+    assert (comp_pred >= 0.0).all()
+
+
 def test_forward_no_nan():
     model = _make_model()
     batch = _make_batch()
@@ -272,13 +290,66 @@ def test_forward_is_differentiable():
     loss.backward()
 
 
+def test_forward_ignores_query_labels():
+    """Varying query_pseudotime and query_soft_labels must not change predictions.
+
+    These fields are present on ICLBatch for evaluation bookkeeping only —
+    they must never influence the forward computation (data leakage guard).
+    """
+    from spatialmt.context.collate import ICLBatch
+    model = _make_model()
+    model.eval()
+
+    rng = torch.Generator().manual_seed(42)
+    ctx_expr = torch.rand(B, N_ANCHORS, N_GENES, generator=rng)
+    ctx_pt   = torch.rand(B, N_ANCHORS, generator=rng)
+    ctx_sl   = torch.softmax(torch.rand(B, N_ANCHORS, K, generator=rng), dim=-1)
+    q_expr   = torch.rand(B, N_GENES, generator=rng)
+
+    batch_a = ICLBatch(
+        context_expression  = ctx_expr,
+        context_pseudotime  = ctx_pt,
+        context_soft_labels = ctx_sl,
+        query_expression    = q_expr,
+        query_pseudotime    = torch.zeros(B),
+        query_soft_labels   = torch.full((B, K), 1.0 / K),
+    )
+    batch_b = ICLBatch(
+        context_expression  = ctx_expr,
+        context_pseudotime  = ctx_pt,
+        context_soft_labels = ctx_sl,
+        query_expression    = q_expr,
+        query_pseudotime    = torch.ones(B),
+        query_soft_labels   = torch.softmax(torch.randn(B, K), dim=-1),
+    )
+
+    with torch.no_grad():
+        pt_a, comp_a = model(batch_a)
+        pt_b, comp_b = model(batch_b)
+
+    assert torch.allclose(pt_a, pt_b, atol=1e-6), "query_pseudotime leaked into forward"
+    assert torch.allclose(comp_a, comp_b, atol=1e-6), "query_soft_labels leaked into forward"
+
+
+def test_forward_deterministic():
+    """Same inputs must produce bit-exact outputs (eval mode, no dropout)."""
+    model = _make_model()
+    model.eval()
+    batch = _make_batch()
+    with torch.no_grad():
+        pt1, comp1 = model(batch)
+        pt2, comp2 = model(batch)
+    assert torch.equal(pt1, pt2)
+    assert torch.equal(comp1, comp2)
+
+
 # ---------------------------------------------------------------------------
-# LabelInjector
+# AnchorLabelEmbedder
 # ---------------------------------------------------------------------------
 
-def test_label_injector_output_shape():
-    from spatialmt.model.tabicl import LabelInjector
-    inj = LabelInjector(d_model=D_MODEL, k=K)
+def test_anchor_label_embedder_output_shape():
+    from spatialmt.model.tabicl import AnchorLabelEmbedder
+    inj = AnchorLabelEmbedder(d_model=D_MODEL, k=K)
     n_cells = N_ANCHORS + 1
     x   = torch.rand(B, n_cells, D_MODEL)
     pt  = torch.rand(B, N_ANCHORS)
@@ -287,10 +358,10 @@ def test_label_injector_output_shape():
     assert out.shape == (B, n_cells, D_MODEL)
 
 
-def test_label_injector_query_row_unchanged():
+def test_anchor_label_embedder_query_row_unchanged():
     """Query row (last position) must not be modified — no label leakage."""
-    from spatialmt.model.tabicl import LabelInjector
-    inj = LabelInjector(d_model=D_MODEL, k=K)
+    from spatialmt.model.tabicl import AnchorLabelEmbedder
+    inj = AnchorLabelEmbedder(d_model=D_MODEL, k=K)
     n_cells = N_ANCHORS + 1
     x   = torch.rand(B, n_cells, D_MODEL)
     pt  = torch.rand(B, N_ANCHORS)
@@ -299,17 +370,17 @@ def test_label_injector_query_row_unchanged():
     assert torch.allclose(out[:, -1, :], x[:, -1, :])
 
 
-# ---------------------------------------------------------------------------
-# ICLAttention
-# ---------------------------------------------------------------------------
-
-def test_icl_attention_output_shape():
-    from spatialmt.model.tabicl import ICLAttention
-    attn = ICLAttention(d_model=D_MODEL, n_heads=N_HEADS)
+def test_anchor_label_embedder_anchor_rows_modified():
+    """Anchor rows must be modified — injection must actually change them."""
+    from spatialmt.model.tabicl import AnchorLabelEmbedder
+    inj = AnchorLabelEmbedder(d_model=D_MODEL, k=K)
     n_cells = N_ANCHORS + 1
-    x = torch.rand(B, n_cells, D_MODEL)
-    out = attn(x)
-    assert out.shape == (B, D_MODEL)
+    x   = torch.rand(B, n_cells, D_MODEL)
+    pt  = torch.rand(B, N_ANCHORS)
+    sl  = torch.softmax(torch.rand(B, N_ANCHORS, K), dim=-1)
+    out = inj(x, anchor_pseudotime=pt, anchor_soft_labels=sl)
+    # At least one anchor row must differ (injected label embedding is non-trivial)
+    assert not torch.allclose(out[:, :N_ANCHORS, :], x[:, :N_ANCHORS, :])
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +507,19 @@ def test_attention_scorer_diagonal_is_one():
     scorer.remove_hook()
 
 
+def test_attention_scorer_values_bounded():
+    """Cosine similarity values must lie in [-1, 1]."""
+    from spatialmt.model.tabicl import AttentionScorer
+    model = _make_model()
+    scorer = AttentionScorer(model)
+    batch = _make_batch()
+    model(batch)
+    scores = scorer.extract()
+    assert (scores >= -1.0 - 1e-5).all()
+    assert (scores <=  1.0 + 1e-5).all()
+    scorer.remove_hook()
+
+
 def test_attention_scorer_raises_before_forward():
     from spatialmt.model.tabicl import AttentionScorer
     model = _make_model()
@@ -443,6 +527,22 @@ def test_attention_scorer_raises_before_forward():
     with pytest.raises(RuntimeError):
         scorer.extract()
     scorer.remove_hook()
+
+
+def test_attention_scorer_remove_hook_stops_capture():
+    """After remove_hook(), running another forward must not update the scorer."""
+    from spatialmt.model.tabicl import AttentionScorer
+    model = _make_model()
+    scorer = AttentionScorer(model)
+    batch = _make_batch()
+    model(batch)
+    first = scorer.extract().clone()
+    scorer.remove_hook()
+    # Perturb the batch so the second forward would produce different embeddings
+    batch2 = _make_batch(batch_size=B, n_anchors=N_ANCHORS)
+    model(batch2)
+    # Hook is removed — scorer._gene_embeddings must not have changed
+    assert torch.equal(scorer.extract(), first)
 
 
 # ---------------------------------------------------------------------------
@@ -488,6 +588,17 @@ def test_parameter_groups_cover_all_parameters():
     assert all_ids == grouped_ids
 
 
+def test_parameter_groups_no_overlap():
+    """No parameter may appear in more than one group."""
+    model = _make_model()
+    groups = model.parameter_groups()
+    seen = set()
+    for g in groups:
+        for p in g["params"]:
+            assert id(p) not in seen, f"Parameter appears in multiple groups"
+            seen.add(id(p))
+
+
 def test_parameter_groups_no_empty_group():
     model = _make_model()
     for g in model.parameter_groups():
@@ -510,3 +621,46 @@ def test_row_group_is_row_interactor_only():
     row_ids = {id(p) for p in groups["row"]["params"]}
     expected_ids = {id(p) for p in model.row_interactor.parameters()}
     assert row_ids == expected_ids
+
+
+def test_icl_group_is_tf_icl_only():
+    """icl group must contain exactly tf_icl parameters."""
+    model = _make_model()
+    groups = {g["name"]: g for g in model.parameter_groups()}
+    icl_ids = {id(p) for p in groups["icl"]["params"]}
+    expected_ids = {id(p) for p in model.tf_icl.parameters()}
+    assert icl_ids == expected_ids
+
+
+def test_gradient_flows_to_all_groups():
+    """After backward, every parameter group must have at least one non-zero grad.
+
+    TabICLv2 zero-initialises out_proj in all transformer blocks for training
+    stability (residual path dominates at init).  At zero weight the attention
+    branch contributes zero gradient, so col_embedder genuinely receives no
+    gradient on the very first forward pass.  This is by design, not a bug.
+
+    To test graph *connectivity* (not initialisation values) we perturb all
+    out_proj weights to be slightly non-zero before the backward.
+    """
+    model = _make_model()
+
+    # Perturb out_proj so the attention branch is non-trivially connected
+    with torch.no_grad():
+        for m in model.modules():
+            if hasattr(m, "out_proj") and hasattr(m.out_proj, "weight"):
+                m.out_proj.weight.normal_(std=0.01)
+
+    batch = _make_batch()
+    pt_pred, comp_pred = model(batch)
+    pt_target  = torch.rand(B)
+    sl_target  = torch.softmax(torch.rand(B, K), dim=-1)
+    loss = ((pt_pred - pt_target) ** 2).mean() + \
+           -(sl_target * torch.log(comp_pred + 1e-8)).sum(dim=-1).mean()
+    loss.backward()
+
+    groups = {g["name"]: g["params"] for g in model.parameter_groups()}
+    for name, params in groups.items():
+        grads = [p.grad for p in params if p.grad is not None]
+        has_nonzero = any(g.abs().sum().item() > 0 for g in grads)
+        assert has_nonzero, f"Group '{name}' received no gradient"
