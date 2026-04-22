@@ -176,11 +176,11 @@ def merge_and_save(adata_traj: sc.AnnData, adata_prolif: sc.AnnData, original: s
 # Validation plots
 # ---------------------------------------------------------------------------
 
-def plot_pseudotime_vs_day(adata: sc.AnnData, fig_dir) -> None:
+def plot_pseudotime_vs_day(adata: sc.AnnData, fig_dir, pt_col: str = "rank-transformed-pseudotime") -> None:
     import matplotlib.pyplot as plt
 
     day_order = ["HB4_D5", "HB4_D7", "HB4_D11", "HB4_D16", "HB4_D21", "HB4_D30"]
-    groups = [adata.obs.loc[adata.obs["orig.ident"] == d, "pseudotime"].dropna() for d in day_order]
+    groups = [adata.obs.loc[adata.obs["orig.ident"] == d, pt_col].dropna() for d in day_order]
 
     fig, ax = plt.subplots(figsize=(9, 5))
     ax.violinplot(groups, positions=range(len(day_order)), showmedians=True)
@@ -217,7 +217,8 @@ def plot_markers_over_pseudotime(adata_traj: sc.AnnData, fig_dir) -> None:
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 8))
     axes = axes.flatten()
-    pt = adata_traj.obs["pseudotime"].values
+    pt_col = "pseudotime" if "pseudotime" in adata_traj.obs.columns else "rank-transformed-pseudotime"
+    pt = adata_traj.obs[pt_col].values
 
     for i, gene in enumerate(present[:6]):
         idx = adata_traj.var_names.get_loc(gene)
@@ -241,6 +242,13 @@ def plot_markers_over_pseudotime(adata_traj: sc.AnnData, fig_dir) -> None:
 
 
 def plot_raw_vs_ranked(adata_traj: sc.AnnData, fig_dir) -> None:
+    if "dpt_pseudotime" not in adata_traj.obs.columns or "pseudotime" not in adata_traj.obs.columns:
+        warnings.warn(
+            "plot_raw_vs_ranked requires 'dpt_pseudotime' and 'pseudotime' columns — skipping. "
+            "These are only present on the adata_traj returned from compute_dpt_from_css_embedding."
+        )
+        return
+
     import matplotlib.pyplot as plt
     import matplotlib.cm as cm
 

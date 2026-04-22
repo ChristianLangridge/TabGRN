@@ -51,6 +51,7 @@ def _make_valid_dataset(
     orig_ident = pd.Series([f"HB4_D{d}" for d in collection_day])
     soft_labels = _make_soft_labels(n_cells, k, seed=seed)
     manifest_hash = ProcessedDataset._compute_manifest_hash(gene_names)
+    categories = sorted(cell_type_labels.unique())
     return ProcessedDataset(
         expression=expression,
         gene_names=gene_names,
@@ -60,6 +61,7 @@ def _make_valid_dataset(
         cell_type_labels=cell_type_labels,
         orig_ident=orig_ident,
         soft_labels=soft_labels,
+        cell_type_categories=categories,
         manifest_hash=manifest_hash,
     )
 
@@ -94,6 +96,7 @@ def synthetic_dataset_with_labels() -> ProcessedDataset:
     orig_ident = pd.Series([f"HB4_D{d}" for d in collection_day])
     soft_labels = _make_soft_labels(n_cells, K, seed=99)
     manifest_hash = ProcessedDataset._compute_manifest_hash(gene_names)
+    categories = sorted(cell_type_labels.unique())
     return ProcessedDataset(
         expression=expression,
         gene_names=gene_names,
@@ -103,5 +106,6 @@ def synthetic_dataset_with_labels() -> ProcessedDataset:
         cell_type_labels=cell_type_labels,
         orig_ident=orig_ident,
         soft_labels=soft_labels,
+        cell_type_categories=categories,
         manifest_hash=manifest_hash,
     )

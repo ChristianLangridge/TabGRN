@@ -38,6 +38,7 @@ class ProcessedDataset:
     cell_type_labels: pd.Series   # class3 annotations
     orig_ident: pd.Series         # timepoint strings (HB4_D5, etc.)
     soft_labels: np.ndarray       # (n_cells, K), float32, rows sum to 1.0
+    cell_type_categories: list[str]  # sorted class3 label names; index i → soft_labels[:, i]
     manifest_hash: str            # SHA-256 of sorted(gene_names)
 
     def __post_init__(self) -> None:
@@ -327,5 +328,6 @@ class ProcessedDataset:
             cell_type_labels=cell_type_labels,
             orig_ident=orig_ident,
             soft_labels=soft_labels,
+            cell_type_categories=categories,
             manifest_hash=cls._compute_manifest_hash(gene_names),
         )

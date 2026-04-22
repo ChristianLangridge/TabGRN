@@ -1,0 +1,61 @@
+{
+  "run_id": "debug_local",
+  "data": {
+    "max_genes": 256,
+    "test_timepoint": 11,
+    "hardware_tier": "debug",
+    "n_cell_states": 8,
+    "label_softening_temperature": 1.0,
+    "log1p_transform": true
+  },
+  "context": {
+    "n_bins": 6,
+    "cells_per_bin": 5,
+    "max_context_cells": 30,
+    "allow_replacement": true
+  },
+  "model": {
+    "lr_col": 1e-05,
+    "lr_row": 0.0001,
+    "lr_icl": 5e-05,
+    "lr_emb": 0.001,
+    "lr_head": 0.001,
+    "warmup_col_steps": 500,
+    "warmup_icl_steps": 100,
+    "output_head_init_bias": 0.5,
+    "output_head_init_std": 0.01,
+    "bio_plausibility_passed": null
+  },
+  "explainability": {
+    "shap_background_size": 100,
+    "shap_background_seed": 42,
+    "bio_plausibility_required": [
+      "SOX2"
+    ],
+    "ih_n_steps": 50,
+    "ih_baseline_strategy": "day5_mean",
+    "ih_top_k_edges": 500
+  },
+  "perturbation": {
+    "ablations": [
+      {
+        "gene": "WLS",
+        "zero_in_query": true,
+        "zero_in_context_states": null,
+        "zero_in_context_pseudotime_below": null,
+        "zero_in_context_pseudotime_above": null
+      }
+    ],
+    "pseudotime_delta_threshold": -0.05,
+    "attention_drop_fraction": 0.1,
+    "composition_shift_threshold": 0.05
+  },
+  "benchmark": {
+    "baselines": [
+      "mean",
+      "ridge_pca",
+      "xgboost_regressor",
+      "tabicl_finetune"
+    ]
+  }
+}

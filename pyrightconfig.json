@@ -1,0 +1,4 @@
+{
+  "extraPaths": ["path"],
+  "exclude": ["**/__pycache__"]
+}

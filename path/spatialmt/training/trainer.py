@@ -138,6 +138,7 @@ class Trainer:
         n_steps: int = 5000,
         eval_every: int = 100,
         callbacks: list | None = None,
+        seed: int | None = None,
     ) -> None:
         self.model = model
         self.dataset = dataset
@@ -149,6 +150,7 @@ class Trainer:
         self.eval_every = eval_every
         self.callbacks: list = callbacks if callbacks is not None else []
         self.global_step: int = 0
+        self.seed = seed
 
         # Pre-filter query pool: exclude day 11 (held-out test set)
         self._query_pool: list[str] = [
@@ -218,7 +220,7 @@ class Trainer:
         """
         optimizer = self._make_optimizer()
         device = next(self.model.parameters()).device
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(self.seed)
 
         sum_loss = sum_pt = sum_comp = 0.0
 

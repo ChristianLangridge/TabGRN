@@ -16,12 +16,24 @@ Optional env vars:
     DEVICE      — "cpu" | "mps" | "cuda"  (auto-detected if not set)
 """
 import os
-import sys
+
+# macOS OpenMP workaround — must be set before ANY library import.
+# PyTorch, sklearn, and numpy each bundle their own libomp.dylib. On macOS the
+# dynamic linker loads all three, causing a duplicate-runtime segfault when any
+# of them spawns threads. Capping every threading layer to 1 thread prevents the
+# crash. MPS (Metal) is unaffected — it has its own threading model.
+# None of these vars are needed on Linux/Myriad.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import time
 
+import numpy as np
 import torch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from spatialmt.config.experiment import ExperimentConfig
 from spatialmt.config.paths import Dirs
@@ -38,12 +50,15 @@ from spatialmt.training.trainer import Trainer
 
 N_STEPS    = 200   # enough to see a loss trend; ~3–5 min on M4
 EVAL_EVERY = 25    # print a summary line every N steps
+SEED       = 42    # set SEED env var to "" to disable
 
 H5AD_PATH = os.environ.get(
     "H5AD_PATH",
     str(Dirs.model_data_anndata / "neurectoderm_with_pseudotime.h5ad"),
 )
 BACKBONE_PATH = os.environ.get("BACKBONE", None)
+_seed_str = os.environ.get("SEED", str(SEED))
+SEED = int(_seed_str) if _seed_str else None
 
 
 def _detect_device() -> torch.device:
@@ -58,24 +73,14 @@ def _detect_device() -> torch.device:
 
 
 # ---------------------------------------------------------------------------
-# Callback — running-average loss printed at each eval checkpoint
+# Callback — step-progress heartbeat
+# The Trainer calls on_epoch_end(model, dataset, step) — per-step loss values
+# are not passed to callbacks; the final averaged metrics come from fit().
 # ---------------------------------------------------------------------------
 
 class LogCallback:
-    def __init__(self) -> None:
-        self._sum_loss = self._sum_pt = self._sum_comp = 0.0
-        self._n = 0
-
-    def on_epoch_end(self, model, dataset, step: int) -> None:
-        n = max(self._n, 1)
-        print(
-            f"  step {step:>4d}/{N_STEPS}"
-            f"  total={self._sum_loss / n:.4f}"
-            f"  pt={self._sum_pt / n:.4f}"
-            f"  comp={self._sum_comp / n:.4f}"
-        )
-        self._sum_loss = self._sum_pt = self._sum_comp = 0.0
-        self._n = 0
+    def on_epoch_end(self, _model, _dataset, step: int) -> None:
+        print(f"  checkpoint step {step:>4d}/{N_STEPS}")
 
 
 # ---------------------------------------------------------------------------
@@ -86,9 +91,14 @@ def main() -> None:
     device = _detect_device()
     cfg    = ExperimentConfig.debug_preset(run_id="debug_local")
 
+    if SEED is not None:
+        torch.manual_seed(SEED)
+        np.random.seed(SEED)
+
     print("=" * 60)
     print("TabGRN debug run")
     print(f"  device      : {device}")
+    print(f"  seed        : {SEED if SEED is not None else '(none)'}")
     print(f"  n_steps     : {N_STEPS}")
     print(f"  max_genes   : {cfg.data.max_genes}")
     print(f"  n_bins      : {cfg.context.n_bins}  "
@@ -160,6 +170,7 @@ def main() -> None:
     print("=" * 60)
 
     _sanity_checks(metrics, loss_fn, model, cfg)
+    _inference_check(model, dataset, sampler, builder, device)
 
     cfg.save()
     print(f"\nConfig saved to experiments/{cfg.run_id}/config.json")
@@ -198,6 +209,74 @@ def _sanity_checks(
     head_ok = all(p.requires_grad for p in model.pseudotime_head.parameters())
     tag = "OK  " if head_ok else "FAIL"
     print(f"  {tag}  pseudotime_head trainable")
+
+
+def _inference_check(
+    model: TabICLRegressor,
+    dataset: ProcessedDataset,
+    sampler: ContextSampler,
+    builder: CellTableBuilder,
+    device: torch.device,
+) -> None:
+    """Run one forward pass with a day-11 query cell and print predictions.
+
+    Day 11 is the held-out test set — these cells were never used as queries
+    during training, so this is the first time the model sees them.
+    """
+    from spatialmt.context.collate import icl_collate
+
+    print("\n" + "=" * 60)
+    print("Inference check — day 11 query cell")
+
+    day11_ids = [
+        cid for cid, day in zip(dataset.cell_ids, dataset.collection_day)
+        if int(day) == 11
+    ]
+    if not day11_ids:
+        print("  No day-11 cells found in dataset — skipping.")
+        return
+
+    query_id = day11_ids[0]
+    q_idx    = dataset.cell_ids.index(query_id)
+
+    cats = dataset.cell_type_categories
+
+    # Per-day pseudotime summary (median) to check biological plausibility
+    print("\n  Pseudotime medians by collection day:")
+    for day in [5, 7, 11, 16, 21, 30]:
+        mask = dataset.collection_day == day
+        if mask.any():
+            med = float(np.median(dataset.pseudotime[mask]))
+            print(f"    D{day:>2d} : {med:.4f}  (n={mask.sum()})")
+
+    print(f"\n  query cell      : {query_id}")
+    print(f"  true pseudotime : {dataset.pseudotime[q_idx]:.4f}")
+    true_comp = dataset.soft_labels[q_idx]
+    comp_str = "  |  ".join(f"{cats[i]}: {v:.3f}" for i, v in enumerate(true_comp))
+    print(f"  true composition:\n    {comp_str}")
+
+    anchor_ids, _ = sampler.sample(query_id)
+    table, _      = builder.build(query_id, anchor_ids)
+    batch         = icl_collate([(table, _)])
+
+    # Move to device
+    from spatialmt.training.trainer import _batch_to_device
+    batch = _batch_to_device(batch, device)
+
+    model.eval()
+    with torch.no_grad():
+        pt_pred, comp_pred = model(batch)
+    model.train()
+
+    pt_val   = pt_pred[0].item()
+    comp_val = comp_pred[0].cpu().tolist()
+
+    pred_comp_str = "  |  ".join(f"{cats[i]}: {v:.3f}" for i, v in enumerate(comp_val))
+    print(f"\n  pred pseudotime : {pt_val:.4f}")
+    print(f"  pred composition:\n    {pred_comp_str}")
+    print(f"  |pt error|      : {abs(pt_val - dataset.pseudotime[q_idx]):.4f}")
+    print(f"  n context cells : {len(anchor_ids)}")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

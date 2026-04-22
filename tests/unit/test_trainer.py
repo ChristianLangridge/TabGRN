@@ -68,15 +68,17 @@ def _make_dataset(n_cells: int = N_CELLS, n_genes: int = N_GENES, k: int = K) ->
     raw = rng.random((n_cells, k)).astype(np.float32)
     soft_labels = (raw / raw.sum(axis=1, keepdims=True)).astype(np.float32)
     manifest_hash = ProcessedDataset._compute_manifest_hash([f"GENE_{i:02d}" for i in range(n_genes)])
+    cell_type_labels = pd.Series([f"state_{i % k}" for i in range(n_cells)])
     return ProcessedDataset(
         expression=expression,
         gene_names=[f"GENE_{i:02d}" for i in range(n_genes)],
         pseudotime=pseudotime,
         collection_day=days.astype(np.int32),
         cell_ids=[f"cell_{i}" for i in range(n_cells)],
-        cell_type_labels=pd.Series([f"state_{i % k}" for i in range(n_cells)]),
+        cell_type_labels=cell_type_labels,
         orig_ident=pd.Series([f"HB4_D{d}" for d in days]),
         soft_labels=soft_labels,
+        cell_type_categories=sorted(cell_type_labels.unique()),
         manifest_hash=manifest_hash,
     )
 

@@ -39,6 +39,7 @@ def _make_valid(n_cells: int = 60, n_genes: int = 10, k: int = K) -> ProcessedDa
     raw = rng.random((n_cells, k)).astype(np.float32)
     soft_labels = (raw / raw.sum(axis=1, keepdims=True)).astype(np.float32)
     manifest_hash = ProcessedDataset._compute_manifest_hash(gene_names)
+    categories = sorted(cell_type_labels.unique())
     return ProcessedDataset(
         expression=expression,
         gene_names=gene_names,
@@ -48,6 +49,7 @@ def _make_valid(n_cells: int = 60, n_genes: int = 10, k: int = K) -> ProcessedDa
         cell_type_labels=cell_type_labels,
         orig_ident=orig_ident,
         soft_labels=soft_labels,
+        cell_type_categories=categories,
         manifest_hash=manifest_hash,
     )
 
@@ -63,6 +65,7 @@ def _replace(ds: ProcessedDataset, **kwargs) -> ProcessedDataset:
         "cell_type_labels": ds.cell_type_labels,
         "orig_ident": ds.orig_ident,
         "soft_labels": ds.soft_labels,
+        "cell_type_categories": ds.cell_type_categories,
         "manifest_hash": ds.manifest_hash,
     }
     fields.update(kwargs)

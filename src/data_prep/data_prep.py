@@ -33,9 +33,13 @@ if __name__ == "__main__":
     gene_labels = dataset.gene_labels
     y = dataset.y
 
-    # Diffusion pseudotime using CSS embedding from css_pseudotime.R
+    # Diffusion pseudotime using CSS embedding from css_pseudotime.R.
+    # compute_dpt_from_css_embedding returns a Series indexed by cell barcode;
+    # write it directly into adata.obs and save — do not call merge_and_save
+    # separately, which would require re-running exclude_proliferating and
+    # re-attaching columns that only exist inside the function's local scope.
     from spatialmt.data_preparation.diffusion_trajectory import (
-        merge_and_save, plot_pseudotime_vs_day, plot_markers_over_pseudotime, plot_raw_vs_ranked,
+        plot_pseudotime_vs_day, plot_markers_over_pseudotime, plot_raw_vs_ranked,
         exclude_proliferating,
     )
     pseudotime = compute_dpt_from_css_embedding(
@@ -45,9 +49,13 @@ if __name__ == "__main__":
     )
 
     # Persist pseudotime into the full AnnData and save
-    adata_traj, adata_prolif = exclude_proliferating(adata, cell_type_key="class3")
-    merge_and_save(adata_traj, adata_prolif, adata)
+    adata.obs["rank-transformed-pseudotime"] = pseudotime
+    out_path = Dirs.model_data_anndata / "neurectoderm_with_pseudotime.h5ad"
+    adata.write_h5ad(out_path)
+    print(f"Saved full AnnData with pseudotime to {out_path}")
 
+    # Validation plots — need adata_traj for marker plot
+    adata_traj, _ = exclude_proliferating(adata, cell_type_key="class3")
     fig_dir = Dirs.results / "figures" / "pseudotime_css"
     fig_dir.mkdir(parents=True, exist_ok=True)
     plot_pseudotime_vs_day(adata, fig_dir)
