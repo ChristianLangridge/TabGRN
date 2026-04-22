@@ -212,29 +212,38 @@ class TabICLRegressor(nn.Module):
     ----------
     n_genes : int
         Number of highly variable genes (HVG count from DataConfig.max_genes).
-    embed_dim : int
-        Token embedding dimension inside ColEmbedding / RowInteraction.
-    n_heads : int
-        Number of attention heads in backbone and tf_icl.
-    n_layers : int
-        Number of transformer blocks in ColEmbedding, RowInteraction, and tf_icl.
     k : int
         Number of cell states (DataConfig.n_cell_states).
+    embed_dim : int
+        Token embedding dimension — must match pretrained checkpoint (128).
+    n_heads : int
+        Attention heads — must match pretrained checkpoint (8).
     num_cls : int
-        Number of CLS tokens in RowInteraction. d_model = num_cls × embed_dim.
+        CLS tokens in RowInteraction. d_model = num_cls × embed_dim.
+        Must match pretrained checkpoint (4, giving d_model=512).
     col_num_inds : int
-        Number of inducing points in ColEmbedding's ISAB blocks.
+        Inducing points in ColEmbedding's Set Transformer — must match
+        pretrained checkpoint (128).
+    n_layers_col : int
+        ISAB blocks in ColEmbedding — must match pretrained checkpoint (3).
+    n_layers_row : int
+        Blocks in RowInteraction. Not loaded from checkpoint; kept symmetric
+        with col (3). Can differ without breaking weight loading.
+    n_layers_icl : int
+        Blocks in tf_icl Encoder — must match pretrained checkpoint (12).
     """
 
     def __init__(
         self,
         n_genes: int,
+        k: int,
         embed_dim: int,
         n_heads: int,
-        n_layers: int,
-        k: int,
-        num_cls: int = 2,
-        col_num_inds: int = 64,
+        num_cls: int,
+        col_num_inds: int,
+        n_layers_col: int,
+        n_layers_row: int,
+        n_layers_icl: int,
     ) -> None:
         super().__init__()
         d_model = num_cls * embed_dim   # output dim of row_interactor
@@ -242,7 +251,7 @@ class TabICLRegressor(nn.Module):
         # --- TabICLv2 backbone (pretrained weights loaded via load_backbone) ---
         self.col_embedder = ColEmbedding(
             embed_dim=embed_dim,
-            num_blocks=n_layers,
+            num_blocks=n_layers_col,
             nhead=n_heads,
             dim_feedforward=embed_dim * 2,
             num_inds=col_num_inds,
@@ -250,7 +259,7 @@ class TabICLRegressor(nn.Module):
         )
         self.row_interactor = RowInteraction(
             embed_dim=embed_dim,
-            num_blocks=n_layers,
+            num_blocks=n_layers_row,
             nhead=n_heads,
             dim_feedforward=embed_dim * 2,
             num_cls=num_cls,
@@ -259,7 +268,7 @@ class TabICLRegressor(nn.Module):
         # Pretrained ICL transformer from TabICLv2's icl_predictor.tf_icl.
         # Loaded via load_backbone with key remapping icl_predictor.tf_icl.* → tf_icl.*
         self.tf_icl = Encoder(
-            num_blocks=n_layers,
+            num_blocks=n_layers_icl,
             d_model=d_model,
             nhead=n_heads,
             dim_feedforward=d_model * 2,

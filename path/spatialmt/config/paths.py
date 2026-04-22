@@ -89,6 +89,8 @@ class Dirs:
     
     data     = PROJECT_ROOT / "data"
     
+    # TabICLv2 checkpoint
+    TabICLv2_checkpoint = PROJECT_ROOT / "data" / "TabICLv2_checkpoint"
     
     # EDA data
     EDA      = PROJECT_ROOT / "data" / "EDA"
@@ -165,6 +167,11 @@ class Paths:
 
     # --- CSS embedding produced by css_pseudotime.R (input to compute_dpt_from_css_embedding) ---
     css_embedding = Dirs.model_data_ml / "css_embedding.csv"
+
+    # --- Pretrained TabICLv2 backbone checkpoint ---
+    # Download from https://huggingface.co/soda-inria/tabicl and place here,
+    # or point BACKBONE env var to an alternative path.
+    tabicl_checkpoint = Dirs.TabICLv2_checkpoint / "tabicl-regressor-v2-20260212.ckpt"
     
 
 # ---------------------------------------------------------------------------

@@ -41,6 +41,29 @@ class ConfigurationError(ValueError):
 
 
 # ---------------------------------------------------------------------------
+# TabICLv2 pretrained architecture — single source of truth
+#
+# These values are read directly from the published pretrained checkpoint:
+#   col_embedder  : embed_dim=128, nhead=8, 3 ISAB blocks, 128 inducing points
+#   row_interactor: num_cls=4  →  d_model = 4 × 128 = 512
+#   tf_icl        : d_model=512, nhead=8, 12 Encoder blocks
+#
+# DO NOT change these to match a different checkpoint without also retraining
+# from scratch — the model's pretrained weights are tied to these exact shapes.
+# ---------------------------------------------------------------------------
+
+TABICL_V2_ARCH: dict = {
+    "embed_dim":   128,
+    "n_heads":     8,
+    "num_cls":     4,    # d_model = num_cls × embed_dim = 512
+    "col_num_inds": 128, # inducing points in ColEmbedding's Set Transformer
+    "n_layers_col": 3,   # ISAB blocks in ColEmbedding (pretrained)
+    "n_layers_row": 3,   # blocks in RowInteraction (not in checkpoint; kept symmetric)
+    "n_layers_icl": 12,  # blocks in tf_icl Encoder (pretrained)
+}
+
+
+# ---------------------------------------------------------------------------
 # Sub-configs
 # ---------------------------------------------------------------------------
 
@@ -80,6 +103,27 @@ class ContextConfig:
 
 @dataclass
 class ModelConfig:
+    # ------------------------------------------------------------------
+    # TabICLv2 backbone architecture
+    # These must match the pretrained checkpoint exactly.
+    # Defaults are read from TABICL_V2_ARCH — do not override per-preset.
+    # ------------------------------------------------------------------
+    embed_dim: int   = TABICL_V2_ARCH["embed_dim"]
+    n_heads: int     = TABICL_V2_ARCH["n_heads"]
+    num_cls: int     = TABICL_V2_ARCH["num_cls"]
+    col_num_inds: int = TABICL_V2_ARCH["col_num_inds"]
+    n_layers_col: int = TABICL_V2_ARCH["n_layers_col"]
+    n_layers_row: int = TABICL_V2_ARCH["n_layers_row"]
+    n_layers_icl: int = TABICL_V2_ARCH["n_layers_icl"]
+
+    # Path to a pretrained TabICLv2 .ckpt file.
+    # Set by every preset that uses pretrained weights (all except scratch_preset).
+    # None = random initialisation (scratch ablation only).
+    backbone_path: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Optimiser
+    # ------------------------------------------------------------------
     lr_col: float = 1e-5       # column attention — gene × gene
     lr_row: float = 1e-4       # row attention — feature → cell repr
     lr_icl: float = 5e-5       # ICL attention — cell × cell
@@ -226,6 +270,12 @@ class ExperimentConfig:
     # ------------------------------------------------------------------
 
     @classmethod
+    def _pretrained_model_config(cls) -> "ModelConfig":
+        """ModelConfig with backbone_path set to the canonical TabICLv2 checkpoint."""
+        from spatialmt.config.paths import Paths
+        return ModelConfig(backbone_path=str(Paths.tabicl_checkpoint))
+
+    @classmethod
     def debug_preset(cls, run_id: str = "debug") -> "ExperimentConfig":
         tier = HARDWARE_TIERS["debug"]
         return cls(
@@ -239,7 +289,7 @@ class ExperimentConfig:
                 cells_per_bin=5,
                 max_context_cells=tier["max_context_cells"],
             ),
-            model=ModelConfig(),
+            model=cls._pretrained_model_config(),
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(),
@@ -259,7 +309,7 @@ class ExperimentConfig:
                 cells_per_bin=5,
                 max_context_cells=tier["max_context_cells"],
             ),
-            model=ModelConfig(),
+            model=cls._pretrained_model_config(),
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(),
@@ -279,7 +329,7 @@ class ExperimentConfig:
                 cells_per_bin=5,
                 max_context_cells=tier["max_context_cells"],
             ),
-            model=ModelConfig(),
+            model=cls._pretrained_model_config(),
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(
@@ -301,7 +351,7 @@ class ExperimentConfig:
                 cells_per_bin=5,
                 max_context_cells=tier["max_context_cells"],
             ),
-            model=ModelConfig(),
+            model=cls._pretrained_model_config(),
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(),
@@ -309,10 +359,24 @@ class ExperimentConfig:
 
     @classmethod
     def scratch_preset(cls, run_id: str = "scratch") -> "ExperimentConfig":
-        """No pretrained weights — ablation [Phase 6]."""
-        cfg = cls.rotation_finetune(run_id=run_id)
-        # Phase 6: add finetune_strategy flag to ModelConfig when needed
-        return cfg
+        """No pretrained weights — random init ablation [Phase 6]."""
+        tier = HARDWARE_TIERS["standard"]
+        return cls(
+            run_id=run_id,
+            data=DataConfig(
+                max_genes=tier["max_genes"],
+                hardware_tier="standard",
+            ),
+            context=ContextConfig(
+                n_bins=6,
+                cells_per_bin=5,
+                max_context_cells=tier["max_context_cells"],
+            ),
+            model=ModelConfig(backbone_path=None),
+            explainability=ExplainabilityConfig(),
+            perturbation=PerturbationConfig(),
+            benchmark=BenchmarkConfig(),
+        )
 
     @classmethod
     def no_icl_preset(cls, run_id: str = "no_icl") -> "ExperimentConfig":
@@ -329,7 +393,7 @@ class ExperimentConfig:
                 cells_per_bin=1,
                 max_context_cells=tier["max_context_cells"],
             ),
-            model=ModelConfig(),
+            model=cls._pretrained_model_config(),
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(),

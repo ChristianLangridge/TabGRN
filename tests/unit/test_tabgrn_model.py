@@ -88,12 +88,14 @@ def _make_model(
     from spatialmt.model.tabgrn import TabICLRegressor
     return TabICLRegressor(
         n_genes=n_genes,
+        k=k,
         embed_dim=embed_dim,
         n_heads=n_heads,
-        n_layers=n_layers,
-        k=k,
         num_cls=num_cls,
         col_num_inds=col_num_inds,
+        n_layers_col=n_layers,
+        n_layers_row=n_layers,
+        n_layers_icl=n_layers,
     )
 
 

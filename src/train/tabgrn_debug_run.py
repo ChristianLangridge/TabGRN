@@ -56,7 +56,10 @@ H5AD_PATH = os.environ.get(
     "H5AD_PATH",
     str(Dirs.model_data_anndata / "neurectoderm_with_pseudotime.h5ad"),
 )
-BACKBONE_PATH = os.environ.get("BACKBONE", None)
+# BACKBONE env var overrides cfg.model.backbone_path.
+# Leave unset to use the path stored in the preset config.
+_BACKBONE_OVERRIDE = os.environ.get("tabicl-regressor-v2-20260212.ckpt", None)
+
 _seed_str = os.environ.get("SEED", str(SEED))
 SEED = int(_seed_str) if _seed_str else None
 
@@ -103,8 +106,13 @@ def main() -> None:
     print(f"  max_genes   : {cfg.data.max_genes}")
     print(f"  n_bins      : {cfg.context.n_bins}  "
           f"cells_per_bin: {cfg.context.cells_per_bin}")
+    # Resolve backbone path: CLI env var > config > none
+    backbone_path = _BACKBONE_OVERRIDE or cfg.model.backbone_path
     print(f"  h5ad        : {H5AD_PATH}")
-    print(f"  backbone    : {BACKBONE_PATH or '(random init)'}")
+    print(f"  backbone    : {backbone_path or '(random init)'}")
+    print(f"  embed_dim   : {cfg.model.embed_dim}  "
+          f"d_model: {cfg.model.num_cls * cfg.model.embed_dim}  "
+          f"n_heads: {cfg.model.n_heads}")
     print("=" * 60)
 
     # 1. Data
@@ -121,20 +129,24 @@ def main() -> None:
     sampler = ContextSampler(dataset, cfg.context)
     builder = CellTableBuilder(dataset)
 
-    # 3. Model
+    # 3. Model — arch dims come entirely from cfg.model (locked to TabICLv2 checkpoint)
     print("\n[3/4] Initialising model ...")
+    m = cfg.model
     model = TabICLRegressor(
-        n_genes   = dataset.n_genes,
-        embed_dim = 64,
-        n_heads   = 4,
-        n_layers  = 2,
-        k         = cfg.data.n_cell_states,
-        num_cls   = 2,
+        n_genes      = dataset.n_genes,
+        k            = cfg.data.n_cell_states,
+        embed_dim    = m.embed_dim,
+        n_heads      = m.n_heads,
+        num_cls      = m.num_cls,
+        col_num_inds = m.col_num_inds,
+        n_layers_col = m.n_layers_col,
+        n_layers_row = m.n_layers_row,
+        n_layers_icl = m.n_layers_icl,
     ).to(device)
 
-    if BACKBONE_PATH:
-        print(f"  Loading backbone from {BACKBONE_PATH}")
-        model.load_backbone(BACKBONE_PATH)
+    if backbone_path:
+        print(f"  Loading backbone from {backbone_path}")
+        model.load_backbone(backbone_path)
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {n_params:,}")
@@ -154,6 +166,7 @@ def main() -> None:
         n_steps    = N_STEPS,
         eval_every = EVAL_EVERY,
         callbacks  = [cb],
+        seed       = SEED,
     )
 
     t0 = time.time()

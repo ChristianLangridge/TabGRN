@@ -86,11 +86,14 @@ def _make_dataset(n_cells: int = N_CELLS, n_genes: int = N_GENES, k: int = K) ->
 def _make_toy_model(n_genes: int = N_GENES, k: int = K) -> TabICLRegressor:
     return TabICLRegressor(
         n_genes=n_genes,
+        k=k,
         embed_dim=8,
         n_heads=2,
-        n_layers=1,
-        k=k,
         num_cls=2,
+        col_num_inds=4,
+        n_layers_col=1,
+        n_layers_row=1,
+        n_layers_icl=1,
     )
 
 
