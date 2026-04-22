@@ -92,7 +92,7 @@ def _make_toy_model(n_genes: int = N_GENES, k: int = K) -> TabICLRegressor:
     )
 
 
-def _make_trainer(n_steps: int = 1, n_epochs: int = 1) -> Trainer:
+def _make_trainer(n_steps: int = 1, eval_every: int = 1) -> Trainer:
     cfg = ExperimentConfig.debug_preset()
     dataset = _make_dataset()
     model = _make_toy_model(n_genes=N_GENES, k=K)
@@ -106,8 +106,8 @@ def _make_trainer(n_steps: int = 1, n_epochs: int = 1) -> Trainer:
         builder=builder,
         loss_fn=loss_fn,
         config=cfg,
-        n_epochs=n_epochs,
-        n_steps_per_epoch=n_steps,
+        n_steps=n_steps,
+        eval_every=eval_every,
     )
 
 
@@ -152,14 +152,14 @@ class TestConstruction:
 class TestICLSampling:
     def test_sampler_called_each_step(self):
         """Trainer must call sampler.sample() once per training step."""
-        trainer = _make_trainer(n_steps=3, n_epochs=1)
+        trainer = _make_trainer(n_steps=3)
         with patch.object(trainer.sampler, "sample", wraps=trainer.sampler.sample) as mock_sample:
             trainer.fit()
         assert mock_sample.call_count == 3
 
     def test_builder_called_each_step(self):
         """Trainer must call builder.build() once per training step."""
-        trainer = _make_trainer(n_steps=4, n_epochs=1)
+        trainer = _make_trainer(n_steps=4)
         with patch.object(trainer.builder, "build", wraps=trainer.builder.build) as mock_build:
             trainer.fit()
         assert mock_build.call_count == 4
@@ -193,7 +193,7 @@ class TestICLSampling:
         trainer = Trainer(
             model=model, dataset=dataset, sampler=sampler,
             builder=builder, loss_fn=loss_fn, config=cfg,
-            n_epochs=1, n_steps_per_epoch=20,
+            n_steps=20,
         )
         with patch.object(trainer.builder, "build", side_effect=recording_build):
             trainer.fit()
@@ -237,7 +237,7 @@ class TestICLSampling:
         trainer = Trainer(
             model=model, dataset=dataset, sampler=sampler,
             builder=builder, loss_fn=loss_fn, config=cfg,
-            n_epochs=1, n_steps_per_epoch=5,
+            n_steps=5,
         )
         with patch.object(trainer.sampler, "sample", side_effect=recording_sample):
             trainer.fit()
@@ -255,7 +255,7 @@ class TestICLSampling:
         """The query cell id chosen by the trainer must be forwarded to
         sampler.sample(), not a different cell.  This confirms the trainer
         correctly threads the ICL sampling pipeline."""
-        trainer = _make_trainer(n_steps=3, n_epochs=1)
+        trainer = _make_trainer(n_steps=3)
 
         sampled_queries = []
         original_sample = trainer.sampler.sample
@@ -451,7 +451,7 @@ class TestWarmup:
 
 class TestFitSmoke:
     def test_fit_returns_without_error(self):
-        _make_trainer(n_steps=1, n_epochs=1).fit()
+        _make_trainer(n_steps=1).fit()
 
     def test_fit_returns_dict(self):
         assert isinstance(_make_trainer(n_steps=1).fit(), dict)
@@ -486,12 +486,12 @@ class TestFitSmoke:
 
 class TestStepCounter:
     def test_global_step_increments_each_step(self):
-        trainer = _make_trainer(n_steps=3, n_epochs=1)
+        trainer = _make_trainer(n_steps=3)
         trainer.fit()
         assert trainer.global_step == 3
 
-    def test_global_step_accumulates_across_epochs(self):
-        trainer = _make_trainer(n_steps=2, n_epochs=3)
+    def test_global_step_equals_n_steps_after_fit(self):
+        trainer = _make_trainer(n_steps=6)
         trainer.fit()
         assert trainer.global_step == 6
 
@@ -501,16 +501,26 @@ class TestStepCounter:
 # ---------------------------------------------------------------------------
 
 class TestCallbacks:
-    def test_callback_on_epoch_end_called_once_per_epoch(self):
+    def test_callback_called_every_eval_every_steps(self):
+        """Callback fires once per eval_every steps — not once per epoch."""
         cb = MagicMock()
-        trainer = _make_trainer(n_steps=1, n_epochs=3)
+        # 3 steps, eval_every=1 → callback fires at steps 1, 2, 3
+        trainer = _make_trainer(n_steps=3, eval_every=1)
         trainer.callbacks = [cb]
         trainer.fit()
         assert cb.on_epoch_end.call_count == 3
 
-    def test_callback_receives_model_dataset_epoch(self):
+    def test_callback_fires_at_eval_every_boundary(self):
+        """With eval_every=2 and n_steps=6, callback fires 3 times."""
         cb = MagicMock()
-        trainer = _make_trainer(n_steps=1, n_epochs=1)
+        trainer = _make_trainer(n_steps=6, eval_every=2)
+        trainer.callbacks = [cb]
+        trainer.fit()
+        assert cb.on_epoch_end.call_count == 3
+
+    def test_callback_receives_model_dataset_step(self):
+        cb = MagicMock()
+        trainer = _make_trainer(n_steps=1, eval_every=1)
         trainer.callbacks = [cb]
         trainer.fit()
         args = cb.on_epoch_end.call_args[0]
@@ -520,7 +530,7 @@ class TestCallbacks:
 
     def test_multiple_callbacks_all_called(self):
         cb1, cb2 = MagicMock(), MagicMock()
-        trainer = _make_trainer(n_steps=1, n_epochs=1)
+        trainer = _make_trainer(n_steps=1, eval_every=1)
         trainer.callbacks = [cb1, cb2]
         trainer.fit()
         cb1.on_epoch_end.assert_called_once()
@@ -558,7 +568,7 @@ class TestNoLabelLeakage:
         trainer = Trainer(
             model=model, dataset=dataset, sampler=sampler,
             builder=builder, loss_fn=loss_fn, config=cfg,
-            n_epochs=1, n_steps_per_epoch=3,
+            n_steps=3,
         )
         with patch.object(trainer.builder, "build", side_effect=capturing_build):
             trainer.fit()
@@ -589,7 +599,7 @@ class TestNoLabelLeakage:
         has zero-filled (or absent) query_pseudotime values that match the
         collated context — not the true targets.
         """
-        trainer = _make_trainer(n_steps=2, n_epochs=1)
+        trainer = _make_trainer(n_steps=2)
 
         model_inputs: list = []
         original_forward = trainer.model.forward

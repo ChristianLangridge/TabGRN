@@ -7,6 +7,11 @@ TabGRN uses a pretrained in-context learning backbone. Each training step
 constructs a fresh (query_cell, context_cells) pair via ContextSampler and
 CellTableBuilder; the model's forward pass *is* the inference step.
 
+There is no epoch concept here — the training data is not a fixed dataset being
+iterated. Instead, each step draws a stochastically sampled ICL pair (query cell
++ context), so the loop is simply a flat step budget (`n_steps`). Callbacks for
+periodic evaluation or checkpointing fire every `eval_every` steps.
+
 "Training" here means gradient-descent fine-tuning:
   • The dual-head stack (PseudotimeHead, CompositionHead) is always trainable.
   • col_embedder (gene×gene attention) is frozen for `warmup_col_steps` steps;
@@ -24,7 +29,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, IterableDataset
 
 from spatialmt.context.collate import ICLBatch, icl_collate
 from spatialmt.training.muon import Muon
@@ -112,13 +116,15 @@ class Trainer:
     builder : CellTableBuilder
     loss_fn : DualHeadLoss
     config : ExperimentConfig
-    n_epochs : int
-        Number of passes through n_steps_per_epoch optimiser steps.
-    n_steps_per_epoch : int
-        Optimiser steps per epoch.  Each step draws one fresh ICL sample.
+    n_steps : int
+        Total number of gradient update steps.  Each step draws a fresh ICL
+        sample (query cell + stochastic context).  There is no epoch concept —
+        the training data is not a fixed dataset.
+    eval_every : int
+        Callbacks are invoked every ``eval_every`` steps for periodic
+        evaluation or checkpointing.
     callbacks : list
-        Objects with an ``on_epoch_end(model, dataset, epoch)`` method called
-        at the end of every epoch.
+        Objects with an ``on_epoch_end(model, dataset, step)`` method.
     """
 
     def __init__(
@@ -129,8 +135,8 @@ class Trainer:
         builder: "CellTableBuilder",
         loss_fn: "DualHeadLoss",
         config: "ExperimentConfig",
-        n_epochs: int = 50,
-        n_steps_per_epoch: int = 100,
+        n_steps: int = 5000,
+        eval_every: int = 100,
         callbacks: list | None = None,
     ) -> None:
         self.model = model
@@ -139,8 +145,8 @@ class Trainer:
         self.builder = builder
         self.loss_fn = loss_fn
         self.config = config
-        self.n_epochs = n_epochs
-        self.n_steps_per_epoch = n_steps_per_epoch
+        self.n_steps = n_steps
+        self.eval_every = eval_every
         self.callbacks: list = callbacks if callbacks is not None else []
         self.global_step: int = 0
 
@@ -150,38 +156,6 @@ class Trainer:
             for cid, day in zip(dataset.cell_ids, dataset.collection_day)
             if int(day) != _WITHHELD_DAY
         ]
-
-    # ------------------------------------------------------------------
-    # DataLoader
-    # ------------------------------------------------------------------
-
-    def _make_dataloader(self) -> DataLoader:
-        """Return a DataLoader backed by a dynamically-sampled IterableDataset.
-
-        Each iteration draws a fresh (query_cell, context) pair from the
-        Trainer's ContextSampler and CellTableBuilder.  The dataset yields
-        n_steps_per_epoch individual (CellTable, TrainingTargets) items;
-        icl_collate wraps each into a batch of size 1.
-        """
-        sampler = self.sampler
-        builder = self.builder
-        query_pool = self._query_pool
-        n_steps = self.n_steps_per_epoch
-
-        class _ICLDataset(IterableDataset):
-            def __iter__(self):
-                rng = np.random.default_rng()
-                for _ in range(n_steps):
-                    query_id = str(rng.choice(query_pool))
-                    anchor_ids, _ = sampler.sample(query_id)
-                    table, targets = builder.build(query_id, anchor_ids)
-                    yield table, targets
-
-        return DataLoader(
-            _ICLDataset(),
-            batch_size=1,
-            collate_fn=icl_collate,
-        )
 
     # ------------------------------------------------------------------
     # Optimizer
@@ -232,6 +206,9 @@ class Trainer:
     def fit(self) -> dict:
         """Run fine-tuning and return averaged metrics.
 
+        Each step draws a fresh (query_cell, context_cells) ICL pair —
+        there is no epoch boundary.  Callbacks fire every ``eval_every`` steps.
+
         Returns
         -------
         dict with keys:
@@ -241,42 +218,44 @@ class Trainer:
         """
         optimizer = self._make_optimizer()
         device = next(self.model.parameters()).device
+        rng = np.random.default_rng()
 
         sum_loss = sum_pt = sum_comp = 0.0
-        total_steps = 0
 
-        for epoch in range(self.n_epochs):
-            dataloader = self._make_dataloader()
+        for _ in range(self.n_steps):
+            self._apply_warmup_freeze(self.global_step)
 
-            for batch in dataloader:
-                self._apply_warmup_freeze(self.global_step)
+            # Draw a fresh ICL sample — stochastic context, no fixed dataset
+            query_id = str(rng.choice(self._query_pool))
+            anchor_ids, _ = self.sampler.sample(query_id)
+            table, targets = self.builder.build(query_id, anchor_ids)
+            batch = icl_collate([(table, targets)])
+            batch = _batch_to_device(batch, device)
 
-                batch = _batch_to_device(batch, device)
+            optimizer.zero_grad()
 
-                optimizer.zero_grad()
+            pt_pred, comp_pred = self.model(batch)
 
-                pt_pred, comp_pred = self.model(batch)
+            total_loss, pt_loss, comp_loss = self.loss_fn(
+                pt_pred,
+                batch.query_pseudotime,
+                comp_pred,
+                batch.query_soft_labels,
+            )
 
-                total_loss, pt_loss, comp_loss = self.loss_fn(
-                    pt_pred,
-                    batch.query_pseudotime,
-                    comp_pred,
-                    batch.query_soft_labels,
-                )
+            total_loss.backward()
+            optimizer.step()
 
-                total_loss.backward()
-                optimizer.step()
+            self.global_step += 1
+            sum_loss += total_loss.item()
+            sum_pt += pt_loss.item()
+            sum_comp += comp_loss.item()
 
-                self.global_step += 1
-                sum_loss += total_loss.item()
-                sum_pt += pt_loss.item()
-                sum_comp += comp_loss.item()
-                total_steps += 1
+            if self.global_step % self.eval_every == 0:
+                for cb in self.callbacks:
+                    cb.on_epoch_end(self.model, self.dataset, self.global_step)
 
-            for cb in self.callbacks:
-                cb.on_epoch_end(self.model, self.dataset, epoch)
-
-        n = max(total_steps, 1)
+        n = max(self.n_steps, 1)
         return {
             "train_loss": sum_loss / n,
             "pt_loss": sum_pt / n,
