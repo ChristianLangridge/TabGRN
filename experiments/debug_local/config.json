@@ -15,6 +15,14 @@
     "allow_replacement": true
   },
   "model": {
+    "embed_dim": 128,
+    "n_heads": 8,
+    "num_cls": 4,
+    "col_num_inds": 128,
+    "n_layers_col": 3,
+    "n_layers_row": 3,
+    "n_layers_icl": 12,
+    "backbone_path": "/Users/christianlangridge/Desktop/TabGRN/data/TabICLv2_checkpoint/tabicl-regressor-v2-20260212.ckpt",
     "lr_col": 1e-05,
     "lr_row": 0.0001,
     "lr_icl": 5e-05,

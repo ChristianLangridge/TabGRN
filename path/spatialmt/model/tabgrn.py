@@ -354,7 +354,8 @@ class TabICLRegressor(nn.Module):
 
         Key remapping
         -------------
-        col_embedder.*           → col_embedder.*       (direct match)
+        col_embedder.*           → excluded (pretrained weights are position-based,
+                                   not gene-name-based; always reinitialised)
         row_interactor.*         → row_interactor.*     (direct match)
         icl_predictor.tf_icl.*   → tf_icl.*             (strip icl_predictor. prefix)
         """
@@ -364,7 +365,10 @@ class TabICLRegressor(nn.Module):
 
         backbone_state: dict = {}
         for k, v in state.items():
-            if k.startswith("col_embedder.") or k.startswith("row_interactor."):
+            if k.startswith("row_interactor."):
+                # col_embedder weights are excluded: pretrained weights are
+                # position-based (feature-order) not gene-name-based, so they
+                # cannot transfer to our gene-indexed input space.
                 backbone_state[k] = v
             elif k.startswith("icl_predictor.tf_icl."):
                 # Remap pretrained ICL transformer into our tf_icl sub-module
