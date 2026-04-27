@@ -20,7 +20,7 @@ periodic evaluation or checkpointing fire every `eval_every` steps.
   • tf_icl (pretrained ICL transformer) is frozen for `warmup_icl_steps` steps.
   • row_interactor and anchor_label_embedder are unfrozen from step 0.
 
-Day 11 cells are the held-out test set. They are excluded from the query pool;
+Day 11 cells are the held-out test set. They are excluded from the fine-tuning query pool;
 ContextSampler already excludes them from the anchor pool.
 """
 from __future__ import annotations
