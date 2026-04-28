@@ -48,7 +48,7 @@ from spatialmt.training.trainer import Trainer
 # Run settings
 # ---------------------------------------------------------------------------
 
-N_STEPS    = 500   # enough to see a loss trend; ~3–5 min on M4
+N_STEPS    = 200   # enough to see a loss trend; ~3–5 min on M4
 EVAL_EVERY = 25    # print a summary line every N steps
 SEED       = 42    # set SEED env var to "" to disable
 
