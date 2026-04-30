@@ -1,7 +1,7 @@
 # TabGRN
 [![Tests](https://github.com/ChristianLangridge/TabGRN/actions/workflows/tests.yml/badge.svg)](https://github.com/ChristianLangridge/TabGRN/actions/workflows/tests.yml)
 
-Integration of TabICLv2 backbone with neuroepithelial brain organoid sc-RNA-seq data for cell trajectory and identity prediction tasks. 
+TabGRN is a novel PFN-style model, fine-tuned with neuroepithelial brain organoid sc-RNA-seq data for cell trajectory and identity prediction tasks. 
 
 ***Joint-rotational project at Queen Mary University London and University College London Dr. Julien Gautrot, Dr. Yanlan Mao and Dr. Isabel Palacios.***
 
