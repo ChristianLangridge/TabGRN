@@ -3,7 +3,7 @@
 
 TabGRN is a novel PFN-style model, fine-tuned with neuroepithelial brain organoid sc-RNA-seq data for cell trajectory and identity prediction tasks. 
 
-***Joint-rotational project at Queen Mary University London and University College London Dr. Julien Gautrot, Dr. Yanlan Mao and Dr. Isabel Palacios.***
+***Joint-rotational project at Queen Mary University London, University College London and The Alan Turing Institute under Prof. Julien Gautrot, Prof. Yanlan Mao and Dr. Isabel Palacios and Dr. Federico Nanni.***
 
 ---
 
