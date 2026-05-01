@@ -25,12 +25,13 @@ import numpy as np
 import torch
 
 from spatialmt.config.experiment import ExperimentConfig
-from spatialmt.config.paths import Dirs
+from spatialmt.config.paths import PROJECT_ROOT
 from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DualHeadLoss
 from spatialmt.model.tabgrn import TabICLRegressor
+from spatialmt.training.callbacks import CheckpointCallback
 from spatialmt.training.trainer import Trainer
 
 # ---------------------------------------------------------------------------
@@ -66,42 +67,13 @@ def _detect_device() -> torch.device:
 
 
 # ---------------------------------------------------------------------------
-# Checkpoint helpers
+# Callback — step-progress heartbeat
 # ---------------------------------------------------------------------------
 
-def _checkpoint_dir() -> "Path":
-    from spatialmt.config.paths import PROJECT_ROOT
-    d = PROJECT_ROOT / "experiments" / "rotation_001" / "checkpoints"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _save_checkpoint(model: TabICLRegressor, loss_fn: DualHeadLoss, step: int) -> None:
-    path = _checkpoint_dir() / f"step_{step:06d}.pt"
-    torch.save(
-        {
-            "step":            step,
-            "model_state":     model.state_dict(),
-            "loss_fn_state":   loss_fn.state_dict(),
-        },
-        path,
-    )
-    print(f"  [ckpt] saved → {path}")
-
-
-# ---------------------------------------------------------------------------
-# Callback — step-progress heartbeat + checkpoint
-# ---------------------------------------------------------------------------
-
-class MyriadCallback:
-    def __init__(self, model: TabICLRegressor, loss_fn: DualHeadLoss) -> None:
-        self._model   = model
-        self._loss_fn = loss_fn
-
+class ProgressCallback:
     def on_epoch_end(self, _model, _dataset, step: int) -> None:
         pct = 100 * step / N_STEPS
         print(f"  [step {step:>6d}/{N_STEPS}]  {pct:.0f}% complete")
-        _save_checkpoint(self._model, self._loss_fn, step)
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +144,14 @@ def main() -> None:
     print(f"\n[4/4] Training for {N_STEPS} steps "
           f"(checkpoint every {EVAL_EVERY}) ...\n")
 
-    cb = MyriadCallback(model, loss_fn)
+    ckpt_dir = PROJECT_ROOT / "experiments" / "rotation_001" / "checkpoints"
+    progress_cb   = ProgressCallback()
+    checkpoint_cb = CheckpointCallback(
+        trainer  = None,   # set after Trainer is constructed below
+        loss_fn  = loss_fn,
+        out_dir  = ckpt_dir,
+        every    = EVAL_EVERY,
+    )
     trainer = Trainer(
         model      = model,
         dataset    = dataset,
@@ -182,9 +161,10 @@ def main() -> None:
         config     = cfg,
         n_steps    = N_STEPS,
         eval_every = EVAL_EVERY,
-        callbacks  = [cb],
+        callbacks  = [progress_cb, checkpoint_cb],
         seed       = SEED,
     )
+    checkpoint_cb.trainer = trainer   # wire back after construction
 
     t0 = time.time()
     metrics = trainer.fit()
@@ -199,8 +179,6 @@ def main() -> None:
     print(f"  comp_loss   : {metrics['comp_loss']:.4f}")
     print("=" * 60)
 
-    # Save final checkpoint and config
-    _save_checkpoint(model, loss_fn, N_STEPS)
     cfg.save()
     print(f"\nConfig saved to experiments/rotation_001/config.json")
 

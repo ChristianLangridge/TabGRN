@@ -93,6 +93,18 @@ class MuonAdamW:
         if self._adamw is not None:
             self._adamw.step(closure)
 
+    def state_dict(self) -> dict:
+        return {
+            "muon":  self._muon.state_dict()  if self._muon  is not None else None,
+            "adamw": self._adamw.state_dict() if self._adamw is not None else None,
+        }
+
+    def load_state_dict(self, state: dict) -> None:
+        if self._muon  is not None and state["muon"]  is not None:
+            self._muon.load_state_dict(state["muon"])
+        if self._adamw is not None and state["adamw"] is not None:
+            self._adamw.load_state_dict(state["adamw"])
+
 
 def _batch_to_device(batch: ICLBatch, device: torch.device) -> ICLBatch:
     return ICLBatch(
@@ -218,7 +230,8 @@ class Trainer:
             "pt_loss"     — raw MSE component
             "comp_loss"   — raw KL divergence component
         """
-        optimizer = self._make_optimizer()
+        self.optimizer = self._make_optimizer()
+        optimizer = self.optimizer
         device = next(self.model.parameters()).device
         rng = np.random.default_rng(self.seed)
 
