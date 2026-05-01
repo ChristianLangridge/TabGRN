@@ -548,6 +548,121 @@ def test_attention_scorer_remove_hook_stops_capture():
 
 
 # ---------------------------------------------------------------------------
+# DirichletCompositionHead wiring — composition_loss_type parameter
+# ---------------------------------------------------------------------------
+
+def _make_dirichlet_model(**kwargs) -> "TabICLRegressor":
+    from spatialmt.model.tabgrn import TabICLRegressor
+    return TabICLRegressor(
+        n_genes=N_GENES,
+        k=K,
+        embed_dim=EMBED_DIM,
+        n_heads=N_HEADS,
+        num_cls=NUM_CLS,
+        col_num_inds=COL_NUM_INDS,
+        n_layers_col=N_LAYERS,
+        n_layers_row=N_LAYERS,
+        n_layers_icl=N_LAYERS,
+        composition_loss_type="dirichlet",
+        **kwargs,
+    )
+
+
+def test_default_composition_loss_type_is_kl():
+    """Backward-compatible default: no argument → CompositionHead (softmax)."""
+    from spatialmt.model.tabgrn import CompositionHead
+    model = _make_model()
+    assert isinstance(model.composition_head, CompositionHead)
+
+
+def test_kl_explicit_composition_loss_type():
+    from spatialmt.model.tabgrn import CompositionHead
+    from spatialmt.model.tabgrn import TabICLRegressor
+    model = TabICLRegressor(
+        n_genes=N_GENES, k=K, embed_dim=EMBED_DIM, n_heads=N_HEADS,
+        num_cls=NUM_CLS, col_num_inds=COL_NUM_INDS,
+        n_layers_col=N_LAYERS, n_layers_row=N_LAYERS, n_layers_icl=N_LAYERS,
+        composition_loss_type="kl",
+    )
+    assert isinstance(model.composition_head, CompositionHead)
+
+
+def test_dirichlet_composition_loss_type_uses_dirichlet_head():
+    from spatialmt.model.tabgrn import DirichletCompositionHead
+    model = _make_dirichlet_model()
+    assert isinstance(model.composition_head, DirichletCompositionHead)
+
+
+def test_invalid_composition_loss_type_raises():
+    from spatialmt.model.tabgrn import TabICLRegressor
+    with pytest.raises(ValueError, match="composition_loss_type"):
+        TabICLRegressor(
+            n_genes=N_GENES, k=K, embed_dim=EMBED_DIM, n_heads=N_HEADS,
+            num_cls=NUM_CLS, col_num_inds=COL_NUM_INDS,
+            n_layers_col=N_LAYERS, n_layers_row=N_LAYERS, n_layers_icl=N_LAYERS,
+            composition_loss_type="cross_entropy",
+        )
+
+
+def test_dirichlet_model_forward_output_shape():
+    model = _make_dirichlet_model()
+    batch = _make_batch()
+    pt_pred, comp_pred = model(batch)
+    assert pt_pred.shape == (B,)
+    assert comp_pred.shape == (B, K)
+
+
+def test_dirichlet_model_forward_comp_pred_all_positive():
+    """DirichletCompositionHead uses softplus — all outputs strictly > 0."""
+    model = _make_dirichlet_model()
+    batch = _make_batch()
+    _, comp_pred = model(batch)
+    assert (comp_pred > 0).all()
+
+
+def test_dirichlet_model_forward_comp_pred_rows_do_not_sum_to_one():
+    """Concentration parameters are NOT a probability distribution."""
+    model = _make_dirichlet_model()
+    batch = _make_batch()
+    _, comp_pred = model(batch)
+    row_sums = comp_pred.sum(dim=-1)
+    assert not torch.allclose(row_sums, torch.ones(B), atol=1e-3)
+
+
+def test_dirichlet_model_forward_no_nan():
+    model = _make_dirichlet_model()
+    batch = _make_batch()
+    pt_pred, comp_pred = model(batch)
+    assert not torch.isnan(pt_pred).any()
+    assert not torch.isnan(comp_pred).any()
+
+
+def test_dirichlet_model_parameter_groups_cover_all_params():
+    """parameter_groups() must still cover every parameter for the dirichlet variant."""
+    model = _make_dirichlet_model()
+    groups = model.parameter_groups()
+    grouped_ids = set()
+    for g in groups:
+        for p in g["params"]:
+            grouped_ids.add(id(p))
+    all_ids = {id(p) for p in model.parameters()}
+    assert all_ids == grouped_ids
+
+
+def test_dirichlet_model_is_differentiable():
+    """DirichletDualHeadLoss.backward() must not raise on dirichlet model output."""
+    from spatialmt.model.loss import DirichletDualHeadLoss
+    model = _make_dirichlet_model()
+    batch = _make_batch()
+    pt_pred, concentrations = model(batch)
+    comp_target = torch.softmax(torch.rand(B, K), dim=-1)
+    pt_target   = torch.rand(B)
+    loss_fn = DirichletDualHeadLoss()
+    total, _, _ = loss_fn(pt_pred, pt_target, concentrations, comp_target)
+    total.backward()
+
+
+# ---------------------------------------------------------------------------
 # Parameter groups
 # ---------------------------------------------------------------------------
 

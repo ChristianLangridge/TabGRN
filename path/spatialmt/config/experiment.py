@@ -134,6 +134,9 @@ class ModelConfig:
     output_head_init_bias: float = 0.5   # PseudotimeHead bias → sigmoid(0.5)≈0.62
     output_head_init_std: float = 0.01   # near-zero weight init for both heads
     bio_plausibility_passed: Optional[bool] = None  # populated post-training
+    # "kl" = KL-divergence CompositionHead (rotation_001)
+    # "dirichlet" = Dirichlet NLL DirichletCompositionHead (rotation_002)
+    composition_loss_type: str = "kl"
 
 
 @dataclass
@@ -310,6 +313,35 @@ class ExperimentConfig:
                 max_context_cells=tier["max_context_cells"],
             ),
             model=cls._pretrained_model_config(),
+            explainability=ExplainabilityConfig(),
+            perturbation=PerturbationConfig(),
+            benchmark=BenchmarkConfig(),
+        )
+
+    @classmethod
+    def rotation_finetune_dirichlet(cls, run_id: str = "rotation_002") -> "ExperimentConfig":
+        """Dirichlet NLL variant of rotation_finetune.
+
+        Identical hardware tier and context to rotation_001, but uses
+        DirichletCompositionHead + DirichletDualHeadLoss instead of the
+        KL-divergence composition head. Produces per-class uncertainty estimates
+        (α₀, Var(p̂_k)) alongside point predictions.
+        """
+        tier = HARDWARE_TIERS["standard"]
+        model_cfg = cls._pretrained_model_config()
+        model_cfg.composition_loss_type = "dirichlet"
+        return cls(
+            run_id=run_id,
+            data=DataConfig(
+                max_genes=tier["max_genes"],
+                hardware_tier="standard",
+            ),
+            context=ContextConfig(
+                n_bins=6,
+                cells_per_bin=5,
+                max_context_cells=tier["max_context_cells"],
+            ),
+            model=model_cfg,
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(),

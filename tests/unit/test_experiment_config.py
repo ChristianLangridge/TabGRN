@@ -284,3 +284,70 @@ def test_rotation_baselines_preset_baseline_list():
     assert "mean" in cfg.benchmark.baselines
     assert "ridge_pca" in cfg.benchmark.baselines
     assert "xgboost_regressor" in cfg.benchmark.baselines
+
+
+# ---------------------------------------------------------------------------
+# rotation_finetune_dirichlet preset
+# ---------------------------------------------------------------------------
+
+def test_rotation_finetune_dirichlet_exists():
+    assert hasattr(ExperimentConfig, "rotation_finetune_dirichlet")
+
+
+def test_rotation_finetune_dirichlet_returns_experiment_config():
+    cfg = ExperimentConfig.rotation_finetune_dirichlet()
+    assert isinstance(cfg, ExperimentConfig)
+
+
+def test_rotation_finetune_dirichlet_default_run_id():
+    cfg = ExperimentConfig.rotation_finetune_dirichlet()
+    assert cfg.run_id == "rotation_002"
+
+
+def test_rotation_finetune_dirichlet_run_id_overridable():
+    cfg = ExperimentConfig.rotation_finetune_dirichlet(run_id="my_run")
+    assert cfg.run_id == "my_run"
+
+
+def test_rotation_finetune_dirichlet_composition_loss_type():
+    """ModelConfig must carry composition_loss_type == 'dirichlet' for this preset."""
+    cfg = ExperimentConfig.rotation_finetune_dirichlet()
+    assert cfg.model.composition_loss_type == "dirichlet"
+
+
+def test_rotation_finetune_kl_composition_loss_type():
+    """Baseline preset must carry composition_loss_type == 'kl' (default)."""
+    cfg = ExperimentConfig.rotation_finetune()
+    assert cfg.model.composition_loss_type == "kl"
+
+
+def test_rotation_finetune_dirichlet_same_hardware_tier():
+    kl_cfg  = ExperimentConfig.rotation_finetune()
+    dir_cfg = ExperimentConfig.rotation_finetune_dirichlet()
+    assert kl_cfg.data.max_genes       == dir_cfg.data.max_genes
+    assert kl_cfg.data.hardware_tier   == dir_cfg.data.hardware_tier
+
+
+def test_rotation_finetune_dirichlet_same_context():
+    kl_cfg  = ExperimentConfig.rotation_finetune()
+    dir_cfg = ExperimentConfig.rotation_finetune_dirichlet()
+    assert kl_cfg.context.n_bins         == dir_cfg.context.n_bins
+    assert kl_cfg.context.cells_per_bin  == dir_cfg.context.cells_per_bin
+    assert kl_cfg.context.max_context_cells == dir_cfg.context.max_context_cells
+
+
+def test_rotation_finetune_dirichlet_different_hash_from_kl():
+    """composition_loss_type is a hyperparameter — must produce a distinct config hash."""
+    kl_cfg  = ExperimentConfig.rotation_finetune(run_id="x")
+    dir_cfg = ExperimentConfig.rotation_finetune_dirichlet(run_id="x")
+    assert kl_cfg.config_hash != dir_cfg.config_hash
+
+
+def test_model_config_composition_loss_type_default_is_kl():
+    cfg = ModelConfig()
+    assert cfg.composition_loss_type == "kl"
+
+
+def test_model_config_accepts_dirichlet_loss_type():
+    cfg = ModelConfig(composition_loss_type="dirichlet")
+    assert cfg.composition_loss_type == "dirichlet"

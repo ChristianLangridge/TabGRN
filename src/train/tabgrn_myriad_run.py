@@ -1,7 +1,11 @@
 """
 tabgrn_myriad_run.py — Full training run for TabGRN-ICL on Myriad HPC.
 
-Uses ExperimentConfig.rotation_finetune() (512 genes, batch=16, standard tier).
+Supports two experimental presets selected by the RUN_PRESET env var:
+
+    RUN_PRESET=kl        (default)  rotation_001 — KL divergence composition loss
+    RUN_PRESET=dirichlet            rotation_002 — Dirichlet NLL composition loss
+
 Runs 10 000 gradient steps with checkpointing every 1 000 steps.
 
 Usage
@@ -14,6 +18,7 @@ Required env vars (set in SLURM script):
     BACKBONE       — absolute path to tabicl-regressor-v2-20260212.ckpt
 
 Optional env vars:
+    RUN_PRESET     — "kl" (default) | "dirichlet"
     SEED           — integer RNG seed (default: 42)
     DEVICE         — "cpu" | "cuda"  (auto-detected if not set)
 """
@@ -29,7 +34,7 @@ from spatialmt.config.paths import PROJECT_ROOT
 from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
-from spatialmt.model.loss import DualHeadLoss
+from spatialmt.model.loss import DirichletDualHeadLoss, DualHeadLoss
 from spatialmt.model.tabgrn import TabICLRegressor
 from spatialmt.training.callbacks import CheckpointCallback
 from spatialmt.training.trainer import Trainer
@@ -41,6 +46,12 @@ from spatialmt.training.trainer import Trainer
 N_STEPS        = 10_000
 EVAL_EVERY     = 1_000   # checkpoint + progress log every N steps
 SEED           = int(os.environ.get("SEED", "42"))
+
+_RUN_PRESET = os.environ.get("RUN_PRESET", "kl").lower()
+if _RUN_PRESET not in {"kl", "dirichlet"}:
+    raise RuntimeError(
+        f"RUN_PRESET must be 'kl' or 'dirichlet', got {_RUN_PRESET!r}"
+    )
 
 H5AD_PATH = os.environ.get("H5AD_PATH")
 if not H5AD_PATH:
@@ -55,6 +66,13 @@ if not BACKBONE_PATH:
         "BACKBONE env var is not set.\n"
         "Add: export BACKBONE=/path/to/tabicl-regressor-v2-20260212.ckpt"
     )
+
+
+def _build_config(preset: str) -> ExperimentConfig:
+    """Select ExperimentConfig preset from RUN_PRESET."""
+    if preset == "dirichlet":
+        return ExperimentConfig.rotation_finetune_dirichlet()
+    return ExperimentConfig.rotation_finetune()
 
 
 def _detect_device() -> torch.device:
@@ -82,13 +100,14 @@ class ProgressCallback:
 
 def main() -> None:
     device = _detect_device()
-    cfg    = ExperimentConfig.rotation_finetune(run_id="rotation_001")
+    cfg    = _build_config(_RUN_PRESET)
 
     torch.manual_seed(SEED)
     np.random.seed(SEED)
 
     print("=" * 60)
     print("TabGRN full training run — Myriad")
+    print(f"  preset      : {_RUN_PRESET}  (run_id={cfg.run_id})")
     print(f"  device      : {device}")
     print(f"  seed        : {SEED}")
     print(f"  n_steps     : {N_STEPS}")
@@ -121,15 +140,16 @@ def main() -> None:
     print("\n[3/4] Initialising model ...")
     m = cfg.model
     model = TabICLRegressor(
-        n_genes      = dataset.n_genes,
-        k            = cfg.data.n_cell_states,
-        embed_dim    = m.embed_dim,
-        n_heads      = m.n_heads,
-        num_cls      = m.num_cls,
-        col_num_inds = m.col_num_inds,
-        n_layers_col = m.n_layers_col,
-        n_layers_row = m.n_layers_row,
-        n_layers_icl = m.n_layers_icl,
+        n_genes               = dataset.n_genes,
+        k                     = cfg.data.n_cell_states,
+        embed_dim             = m.embed_dim,
+        n_heads               = m.n_heads,
+        num_cls               = m.num_cls,
+        col_num_inds          = m.col_num_inds,
+        n_layers_col          = m.n_layers_col,
+        n_layers_row          = m.n_layers_row,
+        n_layers_icl          = m.n_layers_icl,
+        composition_loss_type = m.composition_loss_type,
     ).to(device)
 
     print(f"  Loading backbone from {BACKBONE_PATH}")
@@ -138,13 +158,16 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {n_params:,}")
 
-    loss_fn = DualHeadLoss().to(device)
+    loss_fn = (
+        DirichletDualHeadLoss() if m.composition_loss_type == "dirichlet"
+        else DualHeadLoss()
+    ).to(device)
 
     # 4. Train
     print(f"\n[4/4] Training for {N_STEPS} steps "
           f"(checkpoint every {EVAL_EVERY}) ...\n")
 
-    ckpt_dir = PROJECT_ROOT / "experiments" / "rotation_001" / "checkpoints"
+    ckpt_dir = PROJECT_ROOT / "experiments" / cfg.run_id / "checkpoints"
     progress_cb   = ProgressCallback()
     checkpoint_cb = CheckpointCallback(
         trainer  = None,   # set after Trainer is constructed below
@@ -180,7 +203,7 @@ def main() -> None:
     print("=" * 60)
 
     cfg.save()
-    print(f"\nConfig saved to experiments/rotation_001/config.json")
+    print(f"\nConfig saved to experiments/{cfg.run_id}/config.json")
 
     # Loss curve
     history = metrics["loss_history"]
@@ -201,7 +224,8 @@ def main() -> None:
             ax.set_title(title)
             ax.grid(True, alpha=0.3)
 
-        fig.suptitle("TabGRN training — rotation_001", y=1.02)
+        comp_label = "Dirichlet NLL" if _RUN_PRESET == "dirichlet" else "KL divergence"
+        fig.suptitle(f"TabGRN training — {cfg.run_id}  [{comp_label}]", y=1.02)
         fig.tight_layout()
         curve_path = ckpt_dir / "loss_curve.png"
         fig.savefig(curve_path, dpi=150, bbox_inches="tight")

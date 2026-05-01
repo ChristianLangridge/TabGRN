@@ -199,6 +199,35 @@ class CompositionHead(nn.Module):
 
 
 # ---------------------------------------------------------------------------
+# DirichletCompositionHead
+# ---------------------------------------------------------------------------
+
+class DirichletCompositionHead(nn.Module):
+    """Linear → softplus → Dirichlet concentration parameters α ∈ (0, ∞)^K.
+
+    Replaces CompositionHead in the rotation_002 training run. Outputs are
+    NOT a probability distribution — softplus ensures strict positivity so the
+    output is a valid concentration vector for torch.distributions.Dirichlet.
+
+    Mean cell-state probability: α_k / Σα_k  (derived post-hoc by the caller)
+    Total precision:             α₀ = Σα_k   (higher → more confident prediction)
+
+    Input:  (B, d_model)
+    Output: (B, K)  all entries strictly > 0
+
+    Loss: DirichletDualHeadLoss.composition_loss — Dirichlet NLL
+    """
+
+    def __init__(self, d_model: int, k: int, init_std: float = 0.01) -> None:
+        super().__init__()
+        self.linear = nn.Linear(d_model, k)
+        _init_linear(self.linear, weight_std=init_std, bias_value=0.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.softplus(self.linear(x))
+
+
+# ---------------------------------------------------------------------------
 # TabICLRegressor
 # ---------------------------------------------------------------------------
 
@@ -244,9 +273,18 @@ class TabICLRegressor(nn.Module):
         n_layers_col: int,
         n_layers_row: int,
         n_layers_icl: int,
+        composition_loss_type: str = "kl",
     ) -> None:
         super().__init__()
         d_model = num_cls * embed_dim   # output dim of row_interactor
+
+        _VALID_COMP_TYPES = {"kl", "dirichlet"}
+        if composition_loss_type not in _VALID_COMP_TYPES:
+            raise ValueError(
+                f"composition_loss_type must be one of {_VALID_COMP_TYPES!r}, "
+                f"got {composition_loss_type!r}"
+            )
+        self.composition_loss_type = composition_loss_type
 
         # --- TabICLv2 backbone (pretrained weights loaded via load_backbone) ---
         self.col_embedder = ColEmbedding(
@@ -275,10 +313,14 @@ class TabICLRegressor(nn.Module):
         )
 
         # --- Custom regression head stack (always reinitialised) ---
-        self.anchor_label_embedder   = AnchorLabelEmbedder(d_model=d_model, k=k)
-        self.shared_trunk     = SharedTrunk(d_model=d_model)
-        self.pseudotime_head  = PseudotimeHead(d_model=d_model)
-        self.composition_head = CompositionHead(d_model=d_model, k=k)
+        self.anchor_label_embedder = AnchorLabelEmbedder(d_model=d_model, k=k)
+        self.shared_trunk    = SharedTrunk(d_model=d_model)
+        self.pseudotime_head = PseudotimeHead(d_model=d_model)
+        self.composition_head = (
+            CompositionHead(d_model=d_model, k=k)
+            if composition_loss_type == "kl"
+            else DirichletCompositionHead(d_model=d_model, k=k)
+        )
 
     def forward(self, batch: "ICLBatch") -> tuple[torch.Tensor, torch.Tensor]:
         """

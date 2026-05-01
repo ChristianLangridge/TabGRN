@@ -152,3 +152,87 @@ class DualHeadLoss(nn.Module):
             + torch.exp(-s_comp) * L_comp + 0.5 * s_comp
         )
         return total, L_pt, L_comp
+
+
+class DirichletDualHeadLoss(nn.Module):
+    """Uncertainty-weighted MSE + Dirichlet NLL dual-head loss.
+
+    Drop-in replacement for DualHeadLoss in the rotation_002 training run.
+    The pseudotime head is unchanged (MSE). The composition head loss uses
+    Dirichlet negative log-likelihood instead of KL divergence:
+
+        L_comp = -mean_B [ log Dir(y_b ; α_b) ]
+
+    where α = DirichletCompositionHead output (concentrations, all > 0) and
+    y = comp_target (soft labels, rows sum to 1).
+
+    Uncertainty weighting is identical to DualHeadLoss (Kendall et al. 2018).
+    The learnable log σ² parameters must be included in the optimiser.
+
+    At inference:
+        mean prediction : α_k / Σα_k
+        total precision : Σα_k   (higher = more confident)
+        per-class variance : α_k(α₀ − α_k) / (α₀²(α₀ + 1))
+    These are computed by the caller, not returned here.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.log_sigma_sq_pt   = nn.Parameter(torch.zeros(()))
+        self.log_sigma_sq_comp = nn.Parameter(torch.zeros(()))
+
+    def pseudotime_loss(
+        self,
+        pt_pred: torch.Tensor,
+        pt_target: torch.Tensor,
+    ) -> torch.Tensor:
+        """MSE between predicted and target pseudotime (unchanged from DualHeadLoss)."""
+        return F.mse_loss(pt_pred, pt_target)
+
+    def composition_loss(
+        self,
+        concentrations: torch.Tensor,
+        comp_target: torch.Tensor,
+    ) -> torch.Tensor:
+        """Dirichlet NLL: -mean_B log Dir(comp_target ; concentrations).
+
+        Parameters
+        ----------
+        concentrations : (B, K)  strictly positive — DirichletCompositionHead output
+        comp_target    : (B, K)  soft labels summing to 1 per row
+        """
+        return -torch.distributions.Dirichlet(concentrations).log_prob(comp_target).mean()
+
+    def forward(
+        self,
+        pt_pred: torch.Tensor,
+        pt_target: torch.Tensor,
+        concentrations: torch.Tensor,
+        comp_target: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Uncertainty-weighted dual-head loss with Dirichlet NLL composition term.
+
+        Parameters
+        ----------
+        pt_pred        : (B,)    PseudotimeHead output
+        pt_target      : (B,)    ground-truth pseudotime
+        concentrations : (B, K)  DirichletCompositionHead output (all > 0)
+        comp_target    : (B, K)  soft label targets (rows sum to 1)
+
+        Returns
+        -------
+        total    : scalar — uncertainty-weighted combined loss (use for backward)
+        L_pt     : scalar — raw MSE component (log only)
+        L_comp   : scalar — raw Dirichlet NLL component (log only)
+        """
+        L_pt   = self.pseudotime_loss(pt_pred, pt_target)
+        L_comp = self.composition_loss(concentrations, comp_target)
+
+        s_pt   = self.log_sigma_sq_pt
+        s_comp = self.log_sigma_sq_comp
+
+        total = (
+            torch.exp(-s_pt)   * L_pt   + 0.5 * s_pt
+            + torch.exp(-s_comp) * L_comp + 0.5 * s_comp
+        )
+        return total, L_pt, L_comp
