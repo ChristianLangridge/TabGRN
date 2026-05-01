@@ -7,7 +7,6 @@ Tests are organised into:
   - Properties (n_cells, n_genes)
   - Manifest hash (_compute_manifest_hash contract)
   - Soft label computation (_compute_soft_labels contract)
-  - Memory feasibility (_check_memory_feasibility raises ConfigurationError)
   - from_anndata stub (raises NotImplementedError until Phase 2)
 """
 import hashlib
@@ -16,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from spatialmt.config.experiment import ConfigurationError, DataConfig
+from spatialmt.config.experiment import DataConfig
 from spatialmt.data_preparation.dataset import ProcessedDataset
 
 K = 8
@@ -402,39 +401,6 @@ def test_day11_soft_labels_not_used_in_centroid_estimation():
     )
 
 
-# ---------------------------------------------------------------------------
-# Memory feasibility
-# ---------------------------------------------------------------------------
-
-def test_memory_feasibility_raises_config_error_for_large_config():
-    with pytest.raises(ConfigurationError):
-        ProcessedDataset._check_memory_feasibility(
-            n_genes=20_000,
-            d_model=128,
-            batch_size=32,
-            gpu_memory_bytes=16 * 1024 ** 3,
-        )
-
-
-def test_memory_feasibility_ok_for_debug_tier():
-    # debug: n_genes=128, d_model=32, batch_size=2, 16 GB budget
-    ProcessedDataset._check_memory_feasibility(
-        n_genes=128,
-        d_model=32,
-        batch_size=2,
-        gpu_memory_bytes=16 * 1024 ** 3,
-    )
-
-
-def test_memory_feasibility_standard_tier_512_genes():
-    # standard: n_genes=512, d_model=512 (typical transformer), batch_size=16, 16 GB V100
-    # attn_bytes = 16 * 512^2 * 512 * 4 = ~1.07 GB — well within 60% of 16 GB (~9.6 GB)
-    ProcessedDataset._check_memory_feasibility(
-        n_genes=512,
-        d_model=512,
-        batch_size=16,
-        gpu_memory_bytes=16 * 1024 ** 3,
-    )
 
 
 # ---------------------------------------------------------------------------

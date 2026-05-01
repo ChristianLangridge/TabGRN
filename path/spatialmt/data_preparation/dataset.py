@@ -189,30 +189,6 @@ class ProcessedDataset:
 
         return soft_labels.astype(np.float32)
 
-    @staticmethod
-    def _check_memory_feasibility(
-        n_genes: int,
-        d_model: int,
-        batch_size: int,
-        gpu_memory_bytes: int,
-    ) -> None:
-        """
-        Raise ConfigurationError if the column attention matrix exceeds 60% of
-        GPU memory budget.
-
-        Column attention shape: (batch, n_heads≈d_model, n_genes, n_genes) × float32.
-        Approximated as batch × n_genes² × d_model × 4 bytes.
-        """
-        attn_bytes = batch_size * (n_genes ** 2) * d_model * 4
-        budget = gpu_memory_bytes * 0.60
-        if attn_bytes > budget:
-            raise ConfigurationError(
-                f"Column attention on {n_genes} genes requires "
-                f"~{attn_bytes / 1e9:.1f} GB "
-                f"(60% budget: {budget / 1e9:.1f} GB of {gpu_memory_bytes / 1e9:.0f} GB). "
-                "Reduce max_genes or use hardware_tier='full' on A100 (Myriad)."
-            )
-
     # ------------------------------------------------------------------
     # Primary constructor
     # ------------------------------------------------------------------

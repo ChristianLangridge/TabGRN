@@ -26,7 +26,7 @@ Test groups
 4.  Warmup / freeze     — col_embedder frozen until step 500; tf_icl until step 100;
                           head always trainable
 5.  fit() smoke         — single-step run terminates; returns {train_loss, pt_loss,
-                          comp_loss} all finite
+                          comp_loss, loss_history} all finite / well-formed
 6.  Step counter        — global_step increments per step; accumulates across epochs
 7.  Metrics             — returned dict keys and scalar values
 8.  Callbacks           — on_epoch_end(model, dataset, epoch) called once per epoch
@@ -469,6 +469,54 @@ class TestFitSmoke:
 
     def test_fit_result_has_comp_loss(self):
         assert "comp_loss" in _make_trainer(n_steps=1).fit()
+
+    def test_fit_result_has_loss_history(self):
+        assert "loss_history" in _make_trainer(n_steps=1).fit()
+
+    def test_loss_history_is_list(self):
+        assert isinstance(_make_trainer(n_steps=1).fit()["loss_history"], list)
+
+    def test_loss_history_length_equals_n_intervals(self):
+        # n_steps=4, eval_every=2 → 2 intervals recorded
+        result = _make_trainer(n_steps=4, eval_every=2).fit()
+        assert len(result["loss_history"]) == 2
+
+    def test_loss_history_empty_when_no_interval_completes(self):
+        # n_steps=1, eval_every=2 → step 1 never hits a boundary
+        result = _make_trainer(n_steps=1, eval_every=2).fit()
+        assert result["loss_history"] == []
+
+    def test_loss_history_entry_has_step(self):
+        result = _make_trainer(n_steps=2, eval_every=2).fit()
+        assert "step" in result["loss_history"][0]
+
+    def test_loss_history_entry_step_value(self):
+        result = _make_trainer(n_steps=2, eval_every=2).fit()
+        assert result["loss_history"][0]["step"] == 2
+
+    def test_loss_history_entry_has_train_loss(self):
+        result = _make_trainer(n_steps=2, eval_every=2).fit()
+        assert "train_loss" in result["loss_history"][0]
+
+    def test_loss_history_entry_has_pt_loss(self):
+        result = _make_trainer(n_steps=2, eval_every=2).fit()
+        assert "pt_loss" in result["loss_history"][0]
+
+    def test_loss_history_entry_has_comp_loss(self):
+        result = _make_trainer(n_steps=2, eval_every=2).fit()
+        assert "comp_loss" in result["loss_history"][0]
+
+    def test_loss_history_interval_losses_finite(self):
+        result = _make_trainer(n_steps=2, eval_every=2).fit()
+        entry = result["loss_history"][0]
+        assert np.isfinite(entry["train_loss"])
+        assert np.isfinite(entry["pt_loss"])
+        assert np.isfinite(entry["comp_loss"])
+
+    def test_loss_history_steps_are_monotone(self):
+        result = _make_trainer(n_steps=4, eval_every=2).fit()
+        steps = [e["step"] for e in result["loss_history"]]
+        assert steps == sorted(steps)
 
     def test_train_loss_is_finite(self):
         result = _make_trainer(n_steps=2).fit()

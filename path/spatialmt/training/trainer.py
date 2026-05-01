@@ -218,7 +218,7 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def fit(self) -> dict:
-        """Run fine-tuning and return averaged metrics.
+        """Run fine-tuning and return averaged metrics plus per-interval loss history.
 
         Each step draws a fresh (query_cell, context_cells) ICL pair —
         there is no epoch boundary.  Callbacks fire every ``eval_every`` steps.
@@ -226,9 +226,11 @@ class Trainer:
         Returns
         -------
         dict with keys:
-            "train_loss"  — Kendall uncertainty-weighted total loss
-            "pt_loss"     — raw MSE component
-            "comp_loss"   — raw KL divergence component
+            "train_loss"   — Kendall uncertainty-weighted total loss (run average)
+            "pt_loss"      — raw MSE component (run average)
+            "comp_loss"    — raw KL divergence component (run average)
+            "loss_history" — list of dicts, one per eval_every interval:
+                             {"step", "train_loss", "pt_loss", "comp_loss"}
         """
         self.optimizer = self._make_optimizer()
         optimizer = self.optimizer
@@ -236,6 +238,8 @@ class Trainer:
         rng = np.random.default_rng(self.seed)
 
         sum_loss = sum_pt = sum_comp = 0.0
+        interval_loss = interval_pt = interval_comp = 0.0
+        loss_history: list[dict] = []
 
         for _ in range(self.n_steps):
             self._apply_warmup_freeze(self.global_step)
@@ -262,17 +266,26 @@ class Trainer:
             optimizer.step()
 
             self.global_step += 1
-            sum_loss += total_loss.item()
-            sum_pt += pt_loss.item()
-            sum_comp += comp_loss.item()
+            tl, pl, cl = total_loss.item(), pt_loss.item(), comp_loss.item()
+            sum_loss += tl;  interval_loss += tl
+            sum_pt   += pl;  interval_pt   += pl
+            sum_comp += cl;  interval_comp += cl
 
             if self.global_step % self.eval_every == 0:
+                loss_history.append({
+                    "step":       self.global_step,
+                    "train_loss": interval_loss / self.eval_every,
+                    "pt_loss":    interval_pt   / self.eval_every,
+                    "comp_loss":  interval_comp / self.eval_every,
+                })
+                interval_loss = interval_pt = interval_comp = 0.0
                 for cb in self.callbacks:
                     cb.on_epoch_end(self.model, self.dataset, self.global_step)
 
         n = max(self.n_steps, 1)
         return {
-            "train_loss": sum_loss / n,
-            "pt_loss": sum_pt / n,
-            "comp_loss": sum_comp / n,
+            "train_loss":   sum_loss / n,
+            "pt_loss":      sum_pt   / n,
+            "comp_loss":    sum_comp / n,
+            "loss_history": loss_history,
         }

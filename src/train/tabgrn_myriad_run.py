@@ -18,9 +18,9 @@ Optional env vars:
     DEVICE         — "cpu" | "cuda"  (auto-detected if not set)
 """
 import os
-
 import time
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -181,6 +181,32 @@ def main() -> None:
 
     cfg.save()
     print(f"\nConfig saved to experiments/rotation_001/config.json")
+
+    # Loss curve
+    history = metrics["loss_history"]
+    if history:
+        steps      = [r["step"]       for r in history]
+        train_loss = [r["train_loss"] for r in history]
+        pt_loss_h  = [r["pt_loss"]    for r in history]
+        comp_loss_h = [r["comp_loss"] for r in history]
+
+        fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+        for ax, values, title in zip(
+            axes,
+            [train_loss, pt_loss_h, comp_loss_h],
+            ["Total loss (Kendall-weighted)", "Pseudotime loss (MSE)", "Composition loss (KL)"],
+        ):
+            ax.plot(steps, values, linewidth=1.5)
+            ax.set_xlabel("Step")
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
+
+        fig.suptitle("TabGRN training — rotation_001", y=1.02)
+        fig.tight_layout()
+        curve_path = ckpt_dir / "loss_curve.png"
+        fig.savefig(curve_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Loss curve saved to {curve_path}")
 
 
 if __name__ == "__main__":

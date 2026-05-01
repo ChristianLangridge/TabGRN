@@ -221,9 +221,9 @@ class BenchmarkConfig:
 HARDWARE_TIERS: dict[str, dict] = {
     # max_context_cells = n_bins × cells_per_bin (theoretical max; day-11 bin is excluded
     # at runtime, so actual cells fed = (n_bins-1) × cells_per_bin).
-    "debug":    {"max_genes": 256,  "batch_size": 4,  "max_context_cells": 30},
-    "standard": {"max_genes": 512,  "batch_size": 16, "max_context_cells": 50},
-    "full":     {"max_genes": 1024, "batch_size": 32, "max_context_cells": 100},
+    "debug":    {"max_genes": 256,  "max_context_cells": 30},
+    "standard": {"max_genes": 512,  "max_context_cells": 50},
+    "full":     {"max_genes": 1024, "max_context_cells": 100},
 }
 
 

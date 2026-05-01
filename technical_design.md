@@ -1,12 +1,24 @@
 # Technical Design Document
 ## TabGRN-ICL: Tabular Foundation Model for Dynamic GRN Inference
 
-**Version:** 1.6.0  
+**Version:** 1.7.0  
 **Status:** Rotation Scope Active · Dual-Head · Full Trajectory  
 **Project:** Joint rotation — Queen Mary University London / University College London  
 **Supervisors:** Dr. Julien Gautrot · Dr. Yanlan Mao · Dr. Isabel Palacios  
 **Author:** Christian Langridge  
-**Last Updated:** April 2026
+**Last Updated:** May 2026
+
+**Changelog v1.7.0**
+- §2: `training/` marked ✓ Implemented; `experiments/` checkpoint dir updated to include `loss_curve.png`
+- §3 new §3.9–3.11: `Trainer`, `MuonAdamW`, and `CheckpointCallback` documented
+- §3.2: `_check_memory_feasibility` removed from key methods (dead code — never called)
+- §3.5: `load_backbone()` key-exclusion behaviour documented — `col_embedder.*` always excluded (pretrained weights are position-based, incompatible with gene-name-indexed input)
+- §5.5: Memory pre-check section removed (dead code deleted along with 3 tests)
+- §7.1: `batch_size` removed from `HARDWARE_TIERS` — training is batch=1 per step; field was never consumed by `Trainer.fit()`
+- §8.2a: Test counts updated — 300 unit tests GREEN; trainer (65) and callbacks (19) suites added; 3 dead memory-feasibility tests deleted
+- §8.3: Memory pre-check critical test removed
+- §9.3: Week 7 end milestone marked complete
+- §10: New decisions T1–T5 (training layer) added
 
 **Changelog v1.6.0**
 - §2: `context/` marked ✓ Implemented; `collate.py` added to directory listing
@@ -103,53 +115,63 @@ The model operates on the Matrigel-only condition of the Jain et al. 2025 time-c
 ```
 TabGRN/
 ├── pyproject.toml                      # Package registration — pip install -e .
-├── smt_pipeline.yml                    # Conda environment
-├── slurm_jobs.sh                       # Myriad HPC job scripts (all tiers)
+├── myriad_tabgrn.sh                    # SLURM job script — rotation_finetune on Myriad GPU
 ├── LICENSE
 ├── README.md
 │
 ├── experiments/                        # Auto-created at runtime
 │   └── {run_id}/
 │       ├── config.json                 # Serialised ExperimentConfig (every run)
-│       ├── metrics.json                # MAE · attention_entropy · top20_bio_overlap
-│       ├── shap_background.npy         # Locked SHAP background (created once, frozen)
+│       ├── metrics.json                # MAE · attention_entropy · top20_bio_overlap [planned]
+│       ├── shap_background.npy         # Locked SHAP background (created once, frozen) [planned]
 │       └── checkpoints/
-│           └── best_model.pt
+│           ├── step_NNNNNN.pt          # Checkpoint every EVAL_EVERY steps (model + optimizer + loss_fn)
+│           └── loss_curve.png          # 3-panel loss curve: total / pseudotime / composition
 │
 ├── data/
-│   ├── EDA_tpm/
-│   │   └── EDA_processed/
-│   │       └── processed_tpm.csv       # Primary training data (Matrigel time-course)
-│   └── model_data/
-│       └── fleck_2022/                 # External validation — Fleck et al. 2022
+│   ├── EDA/                            # Lancaster time-series bulk RNA-seq
+│   │   ├── Original_TPM_data.csv
+│   │   └── processed/
+│   │       └── processed_tpm.csv
+│   ├── TabICLv2_checkpoint/
+│   │   └── tabicl-regressor-v2-20260212.ckpt   # Pretrained backbone
+│   ├── training_data/
+│   │   └── AnnData/
+│   │       └── neurectoderm_complete.h5ad       # Jain et al. 2025 (Matrigel condition)
+│   ├── WLS_ko_validation/
+│   │   └── AnnData/
+│   │       └── WLS_ko.h5ad                      # External validation — Jain et al. 2025
+│   └── GLI3_ko_validation/
+│       └── AnnData/
+│           └── GLI3_ko.h5ad                     # External validation — He et al. 2022
 │
 ├── path/
-│   └── spatialmt/                      # Installable package root
+│   └── spatialmt/                      # Installable package root (pip install -e .)
 │       │
 │       ├── __init__.py
 │       │
-│       ├── config/
+│       ├── config/                     # ✓ Implemented
 │       │   ├── __init__.py             # Re-exports: Dirs, Paths, PROJECT_ROOT
 │       │   ├── paths.py                # Filesystem path resolution (env var + sentinel walk)
-│       │   └── experiment.py           # ExperimentConfig + all sub-configs
+│       │   └── experiment.py           # ExperimentConfig + all sub-configs + HARDWARE_TIERS
 │       │
-│       ├── data_preparation/           # Data pipeline + schema-validated container
+│       ├── data_preparation/           # ✓ Implemented
 │       │   ├── __init__.py
 │       │   ├── prep.py                 # HVG selection, expression extraction, PreparedData
 │       │   ├── diffusion_trajectory.py # CSS integration, diffusion pseudotime, merge_and_save
-│       │   └── dataset.py              # ProcessedDataset — from_anndata, soft labels, validation ✓
+│       │   └── dataset.py              # ProcessedDataset — from_anndata, soft labels, validation
 │       │
 │       ├── context/                    # ✓ Implemented
 │       │   ├── __init__.py
-│       │   ├── sampler.py              # ContextSampler — day-stratified anchor sampling ✓
-│       │   ├── builder.py              # CellTableBuilder + CellTable + TrainingTargets ✓
-│       │   └── collate.py              # ICLBatch + icl_collate — DataLoader collate fn ✓
+│       │   ├── sampler.py              # ContextSampler — day-stratified anchor sampling
+│       │   ├── builder.py              # CellTableBuilder + CellTable + TrainingTargets
+│       │   └── collate.py              # ICLBatch + icl_collate — DataLoader collate fn
 │       │
 │       ├── model/                      # ✓ Implemented
 │       │   ├── __init__.py
 │       │   ├── tabgrn.py               # TabICLRegressor + AnchorLabelEmbedder + SharedTrunk
-│       │   │                           # + PseudotimeHead + CompositionHead + AttentionScorer ✓
-│       │   ├── loss.py                 # DualHeadLoss — Kendall uncertainty weighting ✓
+│       │   │                           # + PseudotimeHead + CompositionHead + AttentionScorer
+│       │   ├── loss.py                 # DualHeadLoss — Kendall uncertainty weighting
 │       │   └── baselines/              # [planned]
 │       │       ├── __init__.py
 │       │       ├── protocol.py         # BaselineModel Protocol
@@ -160,12 +182,11 @@ TabGRN/
 │       │       ├── no_icl_baseline.py  # Single-cell, no context [Phase 6]
 │       │       └── scratch_baseline.py # TabICLv2 architecture, no pretrain [Phase 6]
 │       │
-│       ├── training/                   # [planned]
+│       ├── training/                   # ✓ Implemented
 │       │   ├── __init__.py
-│       │   ├── trainer.py              # Training loop — Kendall dual-head loss, warmup, callbacks
-│       │   ├── callbacks.py            # AttentionScorer callback, checkpoint saver
-│       │   ├── scheduler.py            # Warmup + cosine LR scheduler
-│       │   └── loss.py                 # [superseded by model/loss.py DualHeadLoss]
+│       │   ├── trainer.py              # Trainer + MuonAdamW — step-budget loop, warmup, loss_history
+│       │   ├── callbacks.py            # CheckpointCallback — saves model/optimizer/loss_fn/step
+│       │   └── muon.py                 # Muon optimizer (Newton-Schulz spectral orthogonalisation)
 │       │
 │       ├── explainability/             # [planned]
 │       │   ├── __init__.py
@@ -181,26 +202,38 @@ TabGRN/
 │           └── external.py             # Fleck et al. 2022 zero-shot evaluation [Phase 7]
 │
 ├── src/
-│   └── experiments/
-│       ├── run_tabicl_finetune.py      # Rotation primary — dual-head, launches rotation_finetune preset
-│       ├── run_baselines.py            # Rotation baselines — mean, ridge, xgboost regressor
-│       ├── run_tabicl_scratch.py       # Ablation — no pretrain [Phase 6]
-│       ├── run_tabicl_no_icl.py        # Ablation — no ICL [Phase 6]
-│       └── run_full_dual_head.py       # Extended training run (more epochs/genes)
+│   ├── EDA_plotting/
+│   │   ├── PCA.py
+│   │   ├── temporal_heatmap.py
+│   │   └── temporal_lineplot.py
+│   ├── data_prep/
+│   │   ├── data_prep.py
+│   │   └── PCA_exploration.py
+│   ├── figures/
+│   │   ├── batch_qc.py
+│   │   ├── cell_identity_proba.py
+│   │   └── pseudotime_regression.py
+│   └── train/
+│       ├── tabgrn_debug_run.py         # Local debug run — rotation_finetune on MPS/CPU, 500 steps
+│       ├── tabgrn_myriad_run.py        # Full Myriad run — 10,000 steps, checkpointing, loss curve
+│       ├── XGB_classifier_run.py       # Baseline — XGBClassifier (cell identity)
+│       ├── XGB_regressor_run.py        # Baseline — XGBRegressor (pseudotime)
+│       ├── linear_regressor_run.py     # Baseline — linear regression
+│       └── nearest_centroid_run.py     # Baseline — NearestCentroid classifier
 │
 └── tests/
     ├── conftest.py                     # Fixtures: debug_config, synthetic_dataset,
     │                                   # synthetic_dataset_with_labels
-    │                                   # [planned: toy_model, synthetic_attention_weights,
-    │                                   #  correlated_expression]
     ├── unit/
     │   ├── test_experiment_config.py   # ExperimentConfig — serialisation, hash, presets (32 tests) ✓
-    │   ├── test_dataset.py             # ProcessedDataset schema contract (29 tests) ✓
+    │   ├── test_dataset.py             # ProcessedDataset schema contract (26 tests) ✓
     │   ├── test_tabgrn_model.py        # TabICLRegressor + sub-modules (53 tests) ✓
     │   ├── test_dual_head_loss.py      # DualHeadLoss — Kendall weighting, KL divergence (26 tests) ✓
     │   ├── test_context_sampler.py     # ContextSampler — bin assignment, sparse bin warning (22 tests) ✓
     │   ├── test_cell_table_builder.py  # CellTableBuilder + CellTable + TrainingTargets (27 tests) ✓
     │   ├── test_icl_collate.py         # ICLBatch + icl_collate — shapes, ragged guard (28 tests) ✓
+    │   ├── test_trainer.py             # Trainer + MuonAdamW — fit(), warmup, loss_history (65 tests) ✓
+    │   ├── test_callbacks.py           # CheckpointCallback — file creation, contents, restore (19 tests) ✓
     │   └── test_shap_scorer.py         # Locked background, correlated-feature sign stability [planned]
     ├── smoke/                          # [planned]
     │   └── test_toy_forward_pass.py    # Layer 2: toy model, shapes, no NaN, (0,1) range
@@ -278,7 +311,6 @@ ExperimentConfig.no_icl_preset()          # Single cell input [Phase 6]
 ```python
 ProcessedDataset.from_anndata(h5ad_path, config)  # Primary constructor — fully implemented
 ProcessedDataset._validate(instance)               # Schema assertion — called inside constructor
-ProcessedDataset._check_memory_feasibility()       # Warns before OOM
 ProcessedDataset._compute_soft_labels()            # Distance-to-centroid softmax, K=8
 ProcessedDataset._compute_manifest_hash()          # SHA-256 of sorted gene names
 ProcessedDataset.save(path) / .load(path)          # Atomic write with manifest (planned)
@@ -431,8 +463,8 @@ def icl_collate(batch: list[tuple[CellTable, TrainingTargets]]) -> ICLBatch
 **Critical implementation details:**
 - `emb.clone()` passed to `row_interactor` — `RowInteraction._train_forward` performs an in-place write to CLS token slots; the clone prevents this from severing autograd to `col_embedder`
 - `batch.context_pseudotime` always passed as `y_train` to `col_embedder`, even though `target_aware=False` — `ColEmbedding` reads `y_train.shape[1]` unconditionally for ISAB masking
-- `tf_icl` loaded via `load_backbone(checkpoint_path)` with key remapping: `icl_predictor.tf_icl.*` → `tf_icl.*`
-- Warmup/freeze scheduling (col: 500 steps, icl: 100 steps) specified in `ModelConfig` but not yet implemented in the training loop
+- `tf_icl` loaded via `load_backbone(checkpoint_path)` with key remapping: `icl_predictor.tf_icl.*` → `tf_icl.*`; `col_embedder.*` keys are **always excluded** — pretrained column embeddings are position-indexed (feature order in the pretraining tabular task), not gene-name-indexed; they are reinitialised fresh for every TabGRN run
+- Warmup/freeze scheduling (col: 500 steps, icl: 100 steps) implemented in `Trainer._apply_warmup_freeze()` — applied at the start of every step
 
 **Dependencies:** `torch`, `torch.nn`, `tabicl.model.embedding.ColEmbedding`, `tabicl.model.interaction.RowInteraction`, `tabicl.model.encoders.Encoder`, `spatialmt.config.experiment.ModelConfig`
 
@@ -524,7 +556,86 @@ total = exp(–s_pt)  · L_pt   + ½·s_pt
 
 ---
 
-### 3.9 `GeneScorer` Protocol
+### 3.9 `Trainer`
+**File:** `path/spatialmt/training/trainer.py` ✓ Implemented
+
+**Purpose:** Step-budget fine-tuning loop. Each step draws a fresh stochastic `(query_cell, context_cells)` ICL pair — there is no epoch boundary or convergence criterion. The loop runs for exactly `n_steps` gradient updates; callbacks fire every `eval_every` steps.
+
+**Warmup / freeze schedule** (`_apply_warmup_freeze`, called at the start of every step):
+
+| Component | Frozen while | Rationale |
+|---|---|---|
+| `col_embedder` | `global_step < warmup_col_steps` (500) | Random init would perturb the pretrained backbone before embeddings stabilise |
+| `tf_icl` | `global_step < warmup_icl_steps` (100) | Allows dual heads to establish a gradient signal before the ICL transformer unfreezes |
+| `row_interactor`, heads | Always trainable | No warmup needed |
+
+**Query pool:** Day-11 cells are excluded from the query pool at construction (`_WITHHELD_DAY = 11`). `ContextSampler` separately excludes them from anchor bins — day-11 cells are never used for learning in any role.
+
+**Optimizer:** `MuonAdamW` — see §3.10.
+
+**`fit()` return value:**
+```python
+{
+    "train_loss":   float,   # Kendall-weighted total — run average over all n_steps
+    "pt_loss":      float,   # Raw MSE component — run average
+    "comp_loss":    float,   # Raw KL divergence component — run average
+    "loss_history": list[dict],  # One entry per eval_every interval:
+                                 # {"step", "train_loss", "pt_loss", "comp_loss"}
+                                 # Each value is the mean over that interval's steps.
+                                 # Empty list if n_steps < eval_every.
+}
+```
+
+`loss_history` enables post-training convergence diagnosis without requiring TensorBoard on Myriad. `tabgrn_myriad_run.py` reads it and saves a 3-panel PNG to the checkpoint directory.
+
+**Note — effective batch size:** `icl_collate([(table, targets)])` is called with a single pair per step — batch size is always 1. `batch_size` has been removed from `HARDWARE_TIERS` (dead config). True batching (loop B query cells, pass list to `icl_collate`) is architecturally straightforward but deferred: the CPU-side `CellTableBuilder.build()` loop is the bottleneck, not GPU utilisation.
+
+---
+
+### 3.10 `MuonAdamW`
+**File:** `path/spatialmt/training/trainer.py` ✓ Implemented
+
+**Purpose:** Composite optimizer routing parameters to Muon or AdamW based on tensor dimensionality.
+
+| Condition | Sub-optimizer | Rationale |
+|---|---|---|
+| `param.ndim >= 2` | Muon (Newton-Schulz spectral step) | Weight matrices — attention projections, FC weights |
+| `param.ndim < 2` | AdamW | Biases, LayerNorm scales, Kendall log σ² scalars |
+
+**Logical groups** (preserved on `MuonAdamW.param_groups` for LR inspection):
+- `col` (lr 1e-5), `row` (lr 1e-4), `icl` (lr 5e-5), `head` (lr 1e-3), `loss` (lr 1e-3 — Kendall σ² parameters)
+
+**Serialisation:** `state_dict()` / `load_state_dict()` delegate to the `_muon` and `_adamw` sub-optimizers, enabling full optimizer state persistence in `CheckpointCallback`.
+
+---
+
+### 3.11 `CheckpointCallback`
+**File:** `path/spatialmt/training/callbacks.py` ✓ Implemented
+
+**Purpose:** Saves a complete training snapshot every `every` steps. Fires inside `Trainer.fit()` via `on_epoch_end(model, dataset, step)`.
+
+**Saved payload** (`step_NNNNNN.pt`):
+```python
+{
+    "global_step":     int,
+    "model_state":     model.state_dict(),
+    "optimizer_state": trainer.optimizer.state_dict(),  # MuonAdamW — both sub-optimizers
+    "loss_fn_state":   loss_fn.state_dict(),            # Kendall log_sigma_sq_pt + log_sigma_sq_comp
+}
+```
+
+**Construction note:** `CheckpointCallback` requires a `Trainer` reference to access `trainer.optimizer` (assigned by `fit()` at runtime). The standard pattern uses late-wiring — construct with `trainer=None`, then assign after `Trainer` is built:
+```python
+checkpoint_cb = CheckpointCallback(trainer=None, loss_fn=loss_fn, out_dir=ckpt_dir, every=1000)
+trainer = Trainer(..., callbacks=[checkpoint_cb])
+checkpoint_cb.trainer = trainer
+```
+
+**Dependencies:** `torch`, `pathlib.Path`, `spatialmt.training.trainer.Trainer`, `spatialmt.model.loss.DualHeadLoss`
+
+---
+
+### 3.12 `GeneScorer` Protocol
 **File:** `path/spatialmt/explainability/protocols.py`
 
 **Purpose:** Shared interface for all gene importance scoring methods. Adding a new method (e.g., Integrated Gradients) requires one new class; no changes to existing code.
@@ -548,7 +659,7 @@ class GeneScorer(Protocol):
 
 ---
 
-### 3.10 `AttentionScorer`
+### 3.13 `AttentionScorer`
 **File:** `path/spatialmt/explainability/scorers.py`
 
 **Purpose:** Extracts column-attention weights from stage 1 of the TabICLv2 backbone. Produces a `GeneScoreMap` where each gene's score is its mean outgoing attention weight across heads and query cells — representing how much other genes depend on it.
@@ -576,7 +687,7 @@ assert layer_type == "column", (
 
 ---
 
-### 3.11 `SHAPScorer`
+### 3.14 `SHAPScorer`
 **File:** `path/spatialmt/explainability/scorers.py`
 
 **Purpose:** KernelSHAP-based gene importance scoring. Model-agnostic — works on any baseline (XGBoost, TabPFN v2) without modification, enabling direct comparison of SHAP rankings across the benchmark suite.
@@ -595,7 +706,7 @@ assert layer_type == "column", (
 
 ---
 
-### 3.12 `ExplainabilityReport`
+### 3.15 `ExplainabilityReport`
 **File:** `path/spatialmt/explainability/report.py`
 
 **Purpose:** Reconciles `AttentionScorer` and `SHAPScorer` outputs into a structured disagreement taxonomy. The taxonomy classifies every gene into one of three classes per inference call.
@@ -801,32 +912,6 @@ def _compute_soft_labels(expression_pca, cluster_ids, config):
 | `τ = 1.0` | Default — moderate softness, appropriate for organoid data |
 | `τ = 5.0` | Very soft — most cells near-uniform across states |
 
-### 5.5 Memory Pre-Check
-
-```python
-@staticmethod
-def _check_memory_feasibility(n_genes, d_model, batch_size, gpu_memory_bytes):
-    # Column attention matrix: batch × n_heads × n_genes × n_genes × float32
-    attn_bytes = batch_size * (n_genes ** 2) * d_model * 4
-    budget = gpu_memory_bytes * 0.60   # 60% safety margin
-
-    if attn_bytes > budget:
-        raise ConfigurationError(
-            f"Column attention on {n_genes} genes requires "
-            f"~{attn_bytes / 1e9:.1f} GB "
-            f"(budget: {budget / 1e9:.1f} GB).\n"
-            f"Reduce max_genes or use hardware_tier='full' on A100 (Myriad)."
-        )
-```
-
-**Tier safe limits:**
-
-| Tier | max_genes | GPU | Safe batch size |
-|---|---|---|---|
-| `debug` | 128 | Any CPU | 2 |
-| `standard` | 512 | V100 16GB | 16 |
-| `full` | 1024 | A100 40GB | 32 |
-
 ---
 
 ## 6. Integration Guide
@@ -945,11 +1030,13 @@ for epoch in range(n_epochs):
 
 ```python
 HARDWARE_TIERS = {
-    "debug":    {"max_genes": 128,  "batch_size": 2,  "max_context_cells": 10},
-    "standard": {"max_genes": 512,  "batch_size": 16, "max_context_cells": 50},
-    "full":     {"max_genes": 1024, "batch_size": 32, "max_context_cells": 100},
+    "debug":    {"max_genes": 256,  "max_context_cells": 30},
+    "standard": {"max_genes": 512,  "max_context_cells": 50},
+    "full":     {"max_genes": 1024, "max_context_cells": 100},
 }
 ```
+
+`batch_size` is not a field — `Trainer.fit()` always constructs a single `(query, context)` pair per step (effective batch size = 1). See decision T2.
 
 ### 7.2 Biological Plausibility Gate
 
@@ -1011,14 +1098,16 @@ correlated_expression           # GENE_02 and GENE_03 perfectly correlated (SHAP
 
 ### 8.2a Data Preparation and Model Tests
 
-**Unit test files (all GREEN — 219 tests total):**
+**Unit test files (all GREEN — 300 tests total):**
 - `tests/unit/test_experiment_config.py` — 32 tests: ExperimentConfig serialisation, hash, presets, sub-config validation
-- `tests/unit/test_dataset.py` — 29 tests: ProcessedDataset schema contract, soft label computation, manifest hash
+- `tests/unit/test_dataset.py` — 26 tests: ProcessedDataset schema contract, soft label computation, manifest hash (3 dead memory-feasibility tests removed)
 - `tests/unit/test_tabgrn_model.py` — 53 tests: TabICLRegressor construction, forward pass contracts, AnchorLabelEmbedder, AttentionScorer, parameter groups, gradient flow
 - `tests/unit/test_dual_head_loss.py` — 26 tests: DualHeadLoss Kendall weighting, KL divergence component, uncertainty mechanics
 - `tests/unit/test_context_sampler.py` — 22 tests: ContextSampler bin assignment, day-11 exclusion, sparse bin warning, rng seeding
 - `tests/unit/test_cell_table_builder.py` — 27 tests: CellTableBuilder shape contracts, CellTable/TrainingTargets separation, KeyError on unknown ids, empty anchor list
 - `tests/unit/test_icl_collate.py` — 28 tests: ICLBatch field shapes, icl_collate dtype, ragged context window guard
+- `tests/unit/test_trainer.py` — 65 tests: Trainer construction, query pool filtering, MuonAdamW param routing, warmup/freeze scheduling, fit() smoke, step counter, metrics, loss_history structure and correctness, callbacks integration
+- `tests/unit/test_callbacks.py` — 19 tests: CheckpointCallback construction, file creation, checkpoint contents (model/optimizer/loss_fn/global_step), restore round-trip for model and Kendall sigmas
 
 **Integration test files:**
 - `tests/integration/test_prep.py` — tests for `spatialmt.data_preparation.prep` (moved from `test/` in v1.3.0)
@@ -1052,6 +1141,20 @@ with warnings.catch_warnings(record=True) as w:
     select_highly_variable_genes(normalised_adata, flavor="seurat_v3")
     assert len(w) == 1  # warns on normalised data with seurat_v3
 
+# Checkpoint round-trip — model and Kendall sigmas restore cleanly
+ckpt = torch.load("step_000001.pt", weights_only=True)
+missing, unexpected = fresh_model.load_state_dict(ckpt["model_state"], strict=True)
+assert missing == [] and unexpected == []
+fresh_loss.load_state_dict(ckpt["loss_fn_state"])
+assert torch.isfinite(fresh_loss.log_sigma_sq_pt)
+assert torch.isfinite(fresh_loss.log_sigma_sq_comp)
+
+# loss_history correctness
+result = trainer.fit()
+assert len(result["loss_history"]) == n_steps // eval_every
+assert result["loss_history"][0]["step"] == eval_every
+assert np.isfinite(result["loss_history"][0]["train_loss"])
+
 # WLS perturbation (requires checkpoint — skips otherwise)
 assert predict(ko_table) - predict(baseline_table) < -0.05           # Signal 1: pseudotime shift
 assert attention(ko_table)["WLS"] < 0.1 * attention(baseline)["WLS"]  # Signal 2: attention drop
@@ -1059,13 +1162,6 @@ assert composition_shift_away_from_nontelencephalic(ko_table, baseline_table)  #
 
 # AttentionScorer softmax invariant
 assert abs(sum(scores.values()) - 1.0) < 1e-5
-
-# Memory pre-check
-with pytest.raises(ConfigurationError):
-    ProcessedDataset._check_memory_feasibility(
-        n_genes=20000, d_model=128, batch_size=32,
-        gpu_memory_bytes=16 * 1024**3
-    )
 ```
 
 ---
@@ -1116,7 +1212,7 @@ pytest tests/unit/ tests/smoke/ -v
 | Week 5 end (Apr 22) | Scaffold pseudotime integrated; `PreparedData` dataclass green | ✓ Complete |
 | Week 6 (Apr 29) | Diffusion pseudotime computed and validated; `ProcessedDataset.from_anndata` implemented and integration-tested | ✓ Complete |
 | Week 7 (Apr 21) | `TabICLRegressor` + `DualHeadLoss` fully implemented; 219 unit tests GREEN; pretrained `Encoder` (tf_icl) integrated; `AnchorLabelEmbedder` formalised | ✓ Complete |
-| Week 7 end (May 6) | **`ContextSampler` + `CellTableBuilder` + `ICLBatch`/`icl_collate` implemented; training loop wired; first Myriad GPU job submitted — dual-head — critical gate** | `ContextSampler`, `CellTableBuilder`, `icl_collate` ✓ Complete — training loop + GPU job pending |
+| Week 7 end (May 6) | **`ContextSampler` + `CellTableBuilder` + `ICLBatch`/`icl_collate` implemented; training loop wired; first Myriad GPU job submitted — dual-head — critical gate** | ✓ Complete — `Trainer`, `MuonAdamW`, `CheckpointCallback` implemented; `tabgrn_myriad_run.py` wired; SLURM script ready; 300/300 unit tests GREEN |
 | Week 8 (May 13) | Baseline ladder (mean → ridge → XGBoost) complete; comparison table generated | |
 | Week 10 (May 27) | Biological plausibility gate — SOX2 in top-20 | |
 | Week 11 (Jun 3) | WLS perturbation Signals 1 + 2 + 3 (composition shift) passing | |
@@ -1201,4 +1297,16 @@ Training baselines on the full dataset **removes both leakage concerns** and giv
 
 ---
 
-*This document reflects all architectural decisions through v1.6.0 (April 2026). The rotation scope (dual-head, regression baseline ladder, WLS/GLI3 perturbation validation) targets July 3rd.*
+### Training Layer Decisions (v1.7.0)
+
+| # | Decision | Rationale |
+|---|---|---|
+| T1 | `col_embedder.*` always excluded from `load_backbone()` | Pretrained column embeddings are position-indexed (feature order in the pretraining tabular task), not gene-name-indexed. They cannot transfer to a new gene set and must be reinitialised fresh every run. Loading them would produce a silent shape mismatch or incorrect GRN signal. |
+| T2 | `batch_size` removed from `HARDWARE_TIERS`; effective batch size = 1 | `Trainer.fit()` always calls `icl_collate([(table, targets)])` — one pair per step. `batch_size` was dead config, never consumed. True batching (loop B pairs, pass list to `icl_collate`) is straightforward but the CPU-side `build()` loop is the bottleneck; deferred post-Myriad run. |
+| T3 | `Trainer.fit()` returns `loss_history` (per-interval averages) | Single-sample gradient updates (batch=1) produce noisy step-level loss. Interval averages over `eval_every` steps smooth the signal enough to diagnose convergence without TensorBoard. Returning from `fit()` keeps the Myriad script self-contained — no external logging service needed on the cluster. |
+| T4 | `tabgrn_myriad_run.py` saves 3-panel loss curve PNG to checkpoint dir | Post-training convergence check without interactive tooling. Pseudotime and composition losses are plotted separately to distinguish which head is responsible for any plateau. |
+| T5 | `CheckpointCallback` saves `loss_fn.state_dict()` alongside model and optimizer | `DualHeadLoss.log_sigma_sq_pt` and `log_sigma_sq_comp` are learnable `nn.Parameter` scalars (Kendall uncertainty weighting). Omitting them from the checkpoint would reset the learned task weighting on resume, distorting the early steps of any continued training run. |
+
+---
+
+*This document reflects all architectural decisions through v1.7.0 (May 2026). The rotation scope (dual-head, regression baseline ladder, WLS/GLI3 perturbation validation) targets July 3rd.*
