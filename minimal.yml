@@ -1,0 +1,18 @@
+name: tabgrn
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.13
+  - numpy
+  - pandas
+  - scikit-learn
+  - scipy
+  - pytorch  # or via pip
+  - matplotlib
+  - seaborn
+  - shap
+  - jupyter
+  - pip
+  - pip:
+    - <anything not on conda>
