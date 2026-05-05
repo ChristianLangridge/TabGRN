@@ -351,3 +351,35 @@ def test_model_config_composition_loss_type_default_is_kl():
 def test_model_config_accepts_dirichlet_loss_type():
     cfg = ModelConfig(composition_loss_type="dirichlet")
     assert cfg.composition_loss_type == "dirichlet"
+
+# ---------------------------------------------------------------------------
+# full_finetune — context window + dirichlet variant
+# ---------------------------------------------------------------------------
+
+def test_full_finetune_context_fills_window():
+    """n_bins × cells_per_bin must equal max_context_cells — no wasted capacity."""
+    cfg = ExperimentConfig.full_finetune()
+    assert cfg.context.n_bins * cfg.context.cells_per_bin == cfg.context.max_context_cells
+
+
+def test_full_finetune_dirichlet_exists():
+    assert hasattr(ExperimentConfig, "full_finetune_dirichlet")
+
+
+def test_full_finetune_dirichlet_composition_loss_type():
+    cfg = ExperimentConfig.full_finetune_dirichlet()
+    assert cfg.model.composition_loss_type == "dirichlet"
+
+
+def test_full_finetune_dirichlet_same_context_as_kl():
+    kl  = ExperimentConfig.full_finetune()
+    dir = ExperimentConfig.full_finetune_dirichlet()
+    assert kl.context.n_bins            == dir.context.n_bins
+    assert kl.context.cells_per_bin     == dir.context.cells_per_bin
+    assert kl.context.max_context_cells == dir.context.max_context_cells
+
+
+def test_full_finetune_dirichlet_different_hash_from_kl():
+    kl  = ExperimentConfig.full_finetune(run_id="x")
+    dir = ExperimentConfig.full_finetune_dirichlet(run_id="x")
+    assert kl.config_hash != dir.config_hash

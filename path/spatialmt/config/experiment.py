@@ -370,7 +370,7 @@ class ExperimentConfig:
         )
 
     @classmethod
-    def full_finetune(cls, run_id: str = "full_finetune") -> "ExperimentConfig":
+    def full_finetune(cls, run_id: str = "rotation_001") -> "ExperimentConfig":
         tier = HARDWARE_TIERS["full"]
         return cls(
             run_id=run_id,
@@ -379,11 +379,34 @@ class ExperimentConfig:
                 hardware_tier="full",
             ),
             context=ContextConfig(
-                n_bins=6,
-                cells_per_bin=5,
+                n_bins=10,
+                cells_per_bin=10,
                 max_context_cells=tier["max_context_cells"],
             ),
             model=cls._pretrained_model_config(),
+            explainability=ExplainabilityConfig(),
+            perturbation=PerturbationConfig(),
+            benchmark=BenchmarkConfig(),
+        )
+
+    @classmethod
+    def full_finetune_dirichlet(cls, run_id: str = "rotation_002") -> "ExperimentConfig":
+        """Dirichlet NLL variant of full_finetune."""
+        tier = HARDWARE_TIERS["full"]
+        model_cfg = cls._pretrained_model_config()
+        model_cfg.composition_loss_type = "dirichlet"
+        return cls(
+            run_id=run_id,
+            data=DataConfig(
+                max_genes=tier["max_genes"],
+                hardware_tier="full",
+            ),
+            context=ContextConfig(
+                n_bins=10,
+                cells_per_bin=10,
+                max_context_cells=tier["max_context_cells"],
+            ),
+            model=model_cfg,
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(),
