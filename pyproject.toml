@@ -14,6 +14,7 @@ dependencies = [
     "pandas",
     "numpy",
     "psutil",
+    "pot",
 ]
 
 [project.optional-dependencies]

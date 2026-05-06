@@ -15,6 +15,8 @@ Composition head
 """
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 
 
@@ -57,34 +59,43 @@ def mae(pred: np.ndarray, true: np.ndarray) -> float:
 # Composition head
 # ---------------------------------------------------------------------------
 
+@functools.lru_cache(maxsize=None)
+def _transport_constraints(K: int) -> np.ndarray:
+    """Equality constraint matrix for the K×K transport LP.
+
+    Returns a (2K, K²) array cached per K — identical for every distribution
+    pair of the same size, so it is built once and reused across all cells.
+
+    Row i        (i < K) : selects row-block i of flattened T → source marginal.
+    Row K+j (j < K) : selects column-stride j of flattened T → target marginal.
+    """
+    A = np.zeros((2 * K, K * K), dtype=np.float64)
+    for i in range(K):
+        A[i, i * K:(i + 1) * K] = 1.0
+    for j in range(K):
+        A[K + j, j::K] = 1.0
+    return A
+
+
 def wasserstein_1(p: np.ndarray, q: np.ndarray, cost_matrix: np.ndarray) -> float:
     """Earth mover's distance between discrete distributions p and q.
 
-    Solves the exact transport LP: min_{T≥0} <T, M>
-    subject to T·1 = p and T^T·1 = q.
+    Uses POT (Python Optimal Transport) network simplex — exact solution,
+    substantially faster than a general LP solver for small K.
 
     Parameters
     ----------
-    p, q        : (K,) float — probability distributions (must sum to 1).
+    p, q        : (K,) float — probability distributions.
     cost_matrix : (K, K) float — ground metric (e.g. inter-centroid L2 distances).
     """
-    from scipy.optimize import linprog
+    import ot
 
-    K = len(p)
-    c = cost_matrix.flatten().astype(np.float64)
+    p = np.asarray(p, dtype=np.float64)
+    q = np.asarray(q, dtype=np.float64)
+    p = p / p.sum()
+    q = q / q.sum()
 
-    # Build equality constraint matrix: row sums = p, col sums = q
-    A_eq = np.zeros((2 * K, K * K), dtype=np.float64)
-    for i in range(K):
-        A_eq[i, i * K:(i + 1) * K] = 1.0   # row i: sum_j T[i,j] = p[i]
-    for j in range(K):
-        A_eq[K + j, j::K] = 1.0             # col j: sum_i T[i,j] = q[j]
-
-    b_eq = np.concatenate([p.astype(np.float64), q.astype(np.float64)])
-    bounds = [(0.0, None)] * (K * K)
-
-    res = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
-    return float(res.fun)
+    return float(ot.emd2(p, q, cost_matrix.astype(np.float64)))
 
 
 def brier_score(
