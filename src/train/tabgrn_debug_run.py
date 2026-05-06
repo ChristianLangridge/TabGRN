@@ -47,7 +47,7 @@ from spatialmt.training.trainer import Trainer
 # ---------------------------------------------------------------------------
 # Run settings
 # ---------------------------------------------------------------------------
-N_STEPS    = 200   # enough to see a loss trend; ~3–5 min on M4
+N_STEPS    = 1000   # enough to see a loss trend; ~3–5 min on M4
 EVAL_EVERY = 25    # print a summary line every N steps
 SEED       = 42    # set SEED env var to "" to disable
 
@@ -286,14 +286,22 @@ def _inference_check(
             med = float(np.median(dataset.pseudotime[mask]))
             print(f"    D{day:>2d} : {med:.4f}  (n={mask.sum()})")
 
+    def _progress(done: int, total: int, prefix: str, width: int = 30) -> None:
+        filled = int(width * done / total)
+        bar = "█" * filled + "░" * (width - filled)
+        print(f"\r  {prefix} [{bar}] {done}/{total}", end="", flush=True)
+        if done == total:
+            print()
+
     # Forward pass over all day-11 cells
-    print(f"\n  Running forward pass over {len(day11_ids)} day-11 cells ...")
+    n_day11 = len(day11_ids)
+    print(f"\n  Running forward pass over {n_day11} day-11 cells ...")
     model.eval()
     pt_preds:   list[float] = []
     comp_preds: list[list[float]] = []
 
     with torch.no_grad():
-        for cid in day11_ids:
+        for i, cid in enumerate(day11_ids):
             anchor_ids, _ = sampler.sample(cid)
             table, label  = builder.build(cid, anchor_ids)
             batch         = icl_collate([(table, label)])
@@ -301,6 +309,7 @@ def _inference_check(
             pt_out, comp_out = model(batch)
             pt_preds.append(pt_out[0].item())
             comp_preds.append(comp_out[0].cpu().tolist())
+            _progress(i + 1, n_day11, prefix="  forward")
 
     model.train()
 
@@ -320,15 +329,15 @@ def _inference_check(
     day_rho   = per_day_spearman(pt_pred_arr, pt_true_arr, day11_days_arr)
 
     # --- Composition metrics ---
-    cost_m    = dataset.centroid_distances.astype(np.float64)
-    emds      = [
-        wasserstein_1(
+    cost_m = dataset.centroid_distances.astype(np.float64)
+    emds: list[float] = []
+    for i in range(len(day11_ids)):
+        emds.append(wasserstein_1(
             comp_pred_arr[i].astype(np.float64),
             comp_true_arr[i].astype(np.float64),
             cost_m,
-        )
-        for i in range(len(day11_ids))
-    ]
+        ))
+        _progress(i + 1, len(day11_ids), prefix="  emd    ")
     mean_emd  = float(np.mean(emds))
     baseline  = wasserstein_baseline(dataset.soft_labels, train_mask, cost_m)
     bs_mean, bs_per_class = brier_score(comp_pred_arr, comp_true_arr)
