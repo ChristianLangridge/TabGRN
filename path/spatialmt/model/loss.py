@@ -155,38 +155,43 @@ class DualHeadLoss(nn.Module):
 
 
 class DirichletDualHeadLoss(nn.Module):
-    """Uncertainty-weighted MSE + Dirichlet NLL dual-head loss.
+    """Kendall-weighted MSE pseudotime loss + fixed-weight Dirichlet NLL composition loss.
 
-    Drop-in replacement for DualHeadLoss in the rotation_002 training run.
-    The pseudotime head is unchanged (MSE). The composition head loss uses
-    Dirichlet negative log-likelihood instead of KL divergence:
+    Pseudotime uses Kendall uncertainty weighting (learnable log σ²) because MSE
+    has a stable, bounded scale that the framework handles cleanly.
 
-        L_comp = -mean_B [ log Dir(y_b ; α_b) ]
-
-    where α = DirichletCompositionHead output (concentrations, all > 0) and
-    y = comp_target (soft labels, rows sum to 1).
-
-    Uncertainty weighting is identical to DualHeadLoss (Kendall et al. 2018).
-    The learnable log σ² parameters must be included in the optimiser.
+    Composition uses a fixed scalar weight λ_comp instead of Kendall weighting.
+    Dirichlet NLL is unbounded below — as concentrations sharpen the log-likelihood
+    grows without limit, causing Kendall's σ to chase it toward −∞ and the combined
+    loss to diverge. A fixed λ keeps the concentration magnitudes interpretable and
+    preserves the per-class uncertainty estimates (α₀, Var(p̂_k)) that are used
+    downstream for GRN edge confidence scoring.
 
     At inference:
-        mean prediction : α_k / Σα_k
-        total precision : Σα_k   (higher = more confident)
-        per-class variance : α_k(α₀ − α_k) / (α₀²(α₀ + 1))
+        mean prediction  : α_k / Σα_k
+        total precision  : α₀ = Σα_k        (higher = more confident)
+        per-class variance: α_k(α₀ − α_k) / (α₀²(α₀ + 1))
     These are computed by the caller, not returned here.
+
+    Parameters
+    ----------
+    lambda_comp : float
+        Fixed weight on the Dirichlet NLL term (default 0.1).  Keeps the
+        composition gradient from swamping the pseudotime signal given that
+        raw Dirichlet NLL values are O(10) vs MSE values of O(0.01–0.1).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, lambda_comp: float = 0.1) -> None:
         super().__init__()
-        self.log_sigma_sq_pt   = nn.Parameter(torch.zeros(()))
-        self.log_sigma_sq_comp = nn.Parameter(torch.zeros(()))
+        self.lambda_comp = lambda_comp
+        self.log_sigma_sq_pt = nn.Parameter(torch.zeros(()))
 
     def pseudotime_loss(
         self,
         pt_pred: torch.Tensor,
         pt_target: torch.Tensor,
     ) -> torch.Tensor:
-        """MSE between predicted and target pseudotime (unchanged from DualHeadLoss)."""
+        """MSE between predicted and target pseudotime."""
         return F.mse_loss(pt_pred, pt_target)
 
     def composition_loss(
@@ -210,7 +215,7 @@ class DirichletDualHeadLoss(nn.Module):
         concentrations: torch.Tensor,
         comp_target: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Uncertainty-weighted dual-head loss with Dirichlet NLL composition term.
+        """Compute the combined loss.
 
         Parameters
         ----------
@@ -221,18 +226,13 @@ class DirichletDualHeadLoss(nn.Module):
 
         Returns
         -------
-        total    : scalar — uncertainty-weighted combined loss (use for backward)
+        total    : scalar — combined loss (use for backward)
         L_pt     : scalar — raw MSE component (log only)
         L_comp   : scalar — raw Dirichlet NLL component (log only)
         """
         L_pt   = self.pseudotime_loss(pt_pred, pt_target)
         L_comp = self.composition_loss(concentrations, comp_target)
 
-        s_pt   = self.log_sigma_sq_pt
-        s_comp = self.log_sigma_sq_comp
-
-        total = (
-            torch.exp(-s_pt)   * L_pt   + 0.5 * s_pt
-            + torch.exp(-s_comp) * L_comp + 0.5 * s_comp
-        )
+        s_pt  = self.log_sigma_sq_pt
+        total = torch.exp(-s_pt) * L_pt + 0.5 * s_pt + self.lambda_comp * L_comp
         return total, L_pt, L_comp

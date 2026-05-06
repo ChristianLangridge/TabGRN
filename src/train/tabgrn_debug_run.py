@@ -40,7 +40,7 @@ from spatialmt.config.paths import Dirs
 from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
-from spatialmt.model.loss import DualHeadLoss
+from spatialmt.model.loss import DirichletDualHeadLoss
 from spatialmt.model.tabgrn import TabICLRegressor
 from spatialmt.training.trainer import Trainer
 
@@ -132,15 +132,16 @@ def main() -> None:
     print("\n[3/4] Initialising model ...")
     m = cfg.model
     model = TabICLRegressor(
-        n_genes      = dataset.n_genes,
-        k            = cfg.data.n_cell_states,
-        embed_dim    = m.embed_dim,
-        n_heads      = m.n_heads,
-        num_cls      = m.num_cls,
-        col_num_inds = m.col_num_inds,
-        n_layers_col = m.n_layers_col,
-        n_layers_row = m.n_layers_row,
-        n_layers_icl = m.n_layers_icl,
+        n_genes               = dataset.n_genes,
+        k                     = cfg.data.n_cell_states,
+        embed_dim             = m.embed_dim,
+        n_heads               = m.n_heads,
+        num_cls               = m.num_cls,
+        col_num_inds          = m.col_num_inds,
+        n_layers_col          = m.n_layers_col,
+        n_layers_row          = m.n_layers_row,
+        n_layers_icl          = m.n_layers_icl,
+        composition_loss_type = "dirichlet",
     ).to(device)
 
     if backbone_path:
@@ -150,7 +151,7 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {n_params:,}")
 
-    loss_fn = DualHeadLoss().to(device)
+    loss_fn = DirichletDualHeadLoss().to(device)
 
     # 4. Train
     print(f"\n[4/4] Training for {N_STEPS} steps (eval every {EVAL_EVERY}) ...\n")
@@ -190,7 +191,7 @@ def main() -> None:
 
 def _sanity_checks(
     metrics: dict,
-    loss_fn: DualHeadLoss,
+    loss_fn: DirichletDualHeadLoss,
     model: TabICLRegressor,
     cfg: ExperimentConfig,
 ) -> None:
@@ -205,11 +206,16 @@ def _sanity_checks(
         tag = "OK  " if math.isfinite(v) else "FAIL"
         print(f"  {tag}  {k} = {v:.4f}")
 
-    # Kendall uncertainty weights learned
-    for name in ("log_sigma_sq_pt", "log_sigma_sq_comp"):
-        val = getattr(loss_fn, name).item()
+    # Kendall uncertainty weights / fixed composition weight
+    val = loss_fn.log_sigma_sq_pt.item()
+    tag = "OK  " if math.isfinite(val) else "FAIL"
+    print(f"  {tag}  log_sigma_sq_pt = {val:.4f}")
+    if hasattr(loss_fn, "log_sigma_sq_comp"):
+        val = loss_fn.log_sigma_sq_comp.item()
         tag = "OK  " if math.isfinite(val) else "FAIL"
-        print(f"  {tag}  {name} = {val:.4f}")
+        print(f"  {tag}  log_sigma_sq_comp = {val:.4f}")
+    else:
+        print(f"  OK    lambda_comp (fixed) = {loss_fn.lambda_comp:.4f}")
 
     # Freeze schedule: 200 steps < warmup_col_steps (500) → col_embedder frozen
     col_frozen = all(not p.requires_grad for p in model.col_embedder.parameters())
@@ -308,7 +314,8 @@ def _inference_check(
             batch         = _batch_to_device(batch, device)
             pt_out, comp_out = model(batch)
             pt_preds.append(pt_out[0].item())
-            comp_preds.append(comp_out[0].cpu().tolist())
+            alpha = comp_out[0]
+            comp_preds.append((alpha / alpha.sum()).cpu().tolist())
             _progress(i + 1, n_day11, prefix="  forward")
 
     model.train()

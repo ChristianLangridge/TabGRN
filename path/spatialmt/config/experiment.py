@@ -124,7 +124,7 @@ class ModelConfig:
     # ------------------------------------------------------------------
     # Optimiser
     # ------------------------------------------------------------------
-    lr_col: float = 1e-5       # column attention — gene × gene
+    lr_col: float = 1e-6       # column attention — gene × gene
     lr_row: float = 1e-4       # row attention — feature → cell repr
     lr_icl: float = 5e-5       # ICL attention — cell × cell
     lr_emb: float = 1e-3       # column embeddings (always re-initialised)
