@@ -289,3 +289,152 @@ class Trainer:
             "comp_loss":    sum_comp / n,
             "loss_history": loss_history,
         }
+
+
+# ---------------------------------------------------------------------------
+# SupervisedTrainer
+# ---------------------------------------------------------------------------
+
+class SupervisedTrainer:
+    """Fine-tunes col_embedder, row_interactor, and output heads via batched
+    supervised learning on all non-day-11 cells.
+
+    tf_icl is permanently frozen at construction and excluded from the
+    optimizer.  After fine-tuning, the pretrained tf_icl is used as-is at
+    inference time to perform within-day-11 ICL — the fine-tuned upstream
+    layers provide biology-aware gene representations.
+
+    Parameters
+    ----------
+    model : TabICLRegressor
+    dataset : ProcessedDataset
+    loss_fn : DualHeadLoss | DirichletDualHeadLoss
+    config : ExperimentConfig
+    n_epochs : int
+        Number of full passes over the non-day-11 cell pool.
+    eval_every : int
+        Callbacks fire and loss is recorded every ``eval_every`` steps.
+    callbacks : list | None
+    seed : int | None
+    """
+
+    def __init__(
+        self,
+        model: "TabICLRegressor",
+        dataset: "ProcessedDataset",
+        loss_fn: "DualHeadLoss",
+        config: "ExperimentConfig",
+        n_epochs: int = 3,
+        eval_every: int = 100,
+        callbacks: list | None = None,
+        seed: int | None = None,
+    ) -> None:
+        self.model      = model
+        self.dataset    = dataset
+        self.loss_fn    = loss_fn
+        self.config     = config
+        self.n_epochs   = n_epochs
+        self.eval_every = eval_every
+        self.callbacks  = callbacks if callbacks is not None else []
+        self.global_step: int = 0
+        self.seed       = seed
+
+        # tf_icl permanently frozen — excluded from optimizer and never updated
+        for p in model.tf_icl.parameters():
+            p.requires_grad_(False)
+
+        self._train_indices: np.ndarray = np.array([
+            i for i, day in enumerate(dataset.collection_day)
+            if int(day) != _WITHHELD_DAY
+        ])
+
+        # Pre-compute population anchor once — mean expression of all non-day-11
+        # cells. Stored as CPU float32; moved to device once at fit() start.
+        self._population_anchor: torch.Tensor = torch.tensor(
+            dataset.expression[self._train_indices].mean(axis=0).astype(np.float32)
+        )
+
+    def _make_optimizer(self) -> "MuonAdamW":
+        model_groups = [g for g in self.model.parameter_groups() if g["name"] != "icl"]
+        loss_group = {
+            "name":   "loss",
+            "params": list(self.loss_fn.parameters()),
+            "lr":     self.config.model.lr_head,
+        }
+        return MuonAdamW(model_groups + [loss_group])
+
+    def _apply_warmup_freeze(self, global_step: int) -> None:
+        col_frozen = global_step < self.config.model.warmup_col_steps
+        for p in self.model.col_embedder.parameters():
+            p.requires_grad_(not col_frozen)
+        # tf_icl always frozen — never re-enabled
+
+    def fit(self) -> dict:
+        """Run supervised fine-tuning and return averaged metrics.
+
+        Returns
+        -------
+        dict with keys: train_loss, pt_loss, comp_loss, loss_history
+        """
+        self.optimizer = self._make_optimizer()
+        optimizer = self.optimizer
+        device = next(self.model.parameters()).device
+        rng = np.random.default_rng(self.seed)
+        batch_size = self.config.model.supervised_batch_size
+        anchor = self._population_anchor.to(device)
+
+        sum_loss = sum_pt = sum_comp = 0.0
+        interval_loss = interval_pt = interval_comp = 0.0
+        loss_history: list[dict] = []
+
+        for _ in range(self.n_epochs):
+            shuffled = rng.permutation(self._train_indices)
+            for start in range(0, len(shuffled), batch_size):
+                self._apply_warmup_freeze(self.global_step)
+                batch_idx = shuffled[start : start + batch_size]
+
+                expr = torch.tensor(
+                    self.dataset.expression[batch_idx].astype(np.float32),
+                    device=device,
+                )
+                pt_target = torch.tensor(
+                    self.dataset.pseudotime[batch_idx].astype(np.float32),
+                    device=device,
+                )
+                sl_target = torch.tensor(
+                    self.dataset.soft_labels[batch_idx].astype(np.float32),
+                    device=device,
+                )
+
+                optimizer.zero_grad()
+                pt_pred, comp_pred = self.model.forward_supervised(expr, anchor)
+                total_loss, pt_loss, comp_loss = self.loss_fn(
+                    pt_pred, pt_target, comp_pred, sl_target,
+                )
+                total_loss.backward()
+                optimizer.step()
+
+                self.global_step += 1
+                tl, pl, cl = total_loss.item(), pt_loss.item(), comp_loss.item()
+                sum_loss += tl;  interval_loss += tl
+                sum_pt   += pl;  interval_pt   += pl
+                sum_comp += cl;  interval_comp += cl
+
+                if self.global_step % self.eval_every == 0:
+                    loss_history.append({
+                        "step":       self.global_step,
+                        "train_loss": interval_loss / self.eval_every,
+                        "pt_loss":    interval_pt   / self.eval_every,
+                        "comp_loss":  interval_comp / self.eval_every,
+                    })
+                    interval_loss = interval_pt = interval_comp = 0.0
+                    for cb in self.callbacks:
+                        cb.on_epoch_end(self.model, self.dataset, self.global_step)
+
+        n = max(self.global_step, 1)
+        return {
+            "train_loss":   sum_loss / n,
+            "pt_loss":      sum_pt   / n,
+            "comp_loss":    sum_comp / n,
+            "loss_history": loss_history,
+        }

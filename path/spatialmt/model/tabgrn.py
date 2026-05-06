@@ -383,6 +383,48 @@ class TabICLRegressor(nn.Module):
 
         return pt_pred, comp_pred
 
+    def forward_supervised(
+        self,
+        gene_expression: torch.Tensor,
+        population_anchor: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Supervised forward pass with a fixed population anchor cell.
+
+        Used during Option-B fine-tuning: col_embedder and row_interactor are
+        trained on all non-day-11 cells via standard mini-batch gradient descent.
+        tf_icl and anchor_label_embedder are bypassed entirely so that tf_icl
+        remains in its pretrained state for inference-time ICL.
+
+        col_embedder requires train_size >= 1 (TabICLv2's ISAB reshapes the
+        training portion and crashes on empty tensors). A single pre-computed
+        population anchor — mean expression of all non-day-11 cells — is
+        broadcast across the batch as the sole anchor. This gives col_embedder
+        a stable, population-level reference for its inducing-point computation
+        with no per-step overhead beyond one cat.
+
+        Parameters
+        ----------
+        gene_expression : (B, n_genes)
+        population_anchor : (n_genes,)
+            Mean expression of all non-day-11 cells, pre-computed by
+            SupervisedTrainer and moved to device once at fit() start.
+
+        Returns
+        -------
+        pt_pred   : (B,)   pseudotime predictions ∈ (0, 1)
+        comp_pred : (B, K) composition predictions
+        """
+        B      = gene_expression.shape[0]
+        anchor = population_anchor.unsqueeze(0).unsqueeze(0).expand(B, 1, -1)
+        x      = torch.cat([anchor, gene_expression.unsqueeze(1)], dim=1)
+        # train_size=1; value ignored since target_aware=False
+        dummy_pt = torch.zeros(B, 1, device=gene_expression.device, dtype=gene_expression.dtype)
+        emb = self.col_embedder(x, dummy_pt)   # (B, 2, seq_len, embed_dim)
+        x   = self.row_interactor(emb.clone()) # (B, 2, d_model)
+        x   = x[:, -1, :]                      # query position → (B, d_model)
+        x   = self.shared_trunk(x)
+        return self.pseudotime_head(x), self.composition_head(x)
+
     def load_backbone(self, checkpoint_path: str, strict: bool = False) -> None:
         """Load pretrained TabICLv2 weights into col_embedder, row_interactor, and tf_icl.
 

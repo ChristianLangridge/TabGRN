@@ -781,3 +781,81 @@ def test_gradient_flows_to_all_groups():
         grads = [p.grad for p in params if p.grad is not None]
         has_nonzero = any(g.abs().sum().item() > 0 for g in grads)
         assert has_nonzero, f"Group '{name}' received no gradient"
+
+
+# ---------------------------------------------------------------------------
+# forward_supervised
+# ---------------------------------------------------------------------------
+
+def _make_anchor(n_genes: int = N_GENES) -> torch.Tensor:
+    return torch.rand(n_genes)
+
+
+def test_forward_supervised_pt_output_shape():
+    model = _make_model()
+    expr = torch.rand(B, N_GENES)
+    pt_pred, _ = model.forward_supervised(expr, _make_anchor())
+    assert pt_pred.shape == (B,)
+
+
+def test_forward_supervised_comp_output_shape():
+    model = _make_model()
+    expr = torch.rand(B, N_GENES)
+    _, comp_pred = model.forward_supervised(expr, _make_anchor())
+    assert comp_pred.shape == (B, K)
+
+
+def test_forward_supervised_pt_in_unit_interval():
+    model = _make_model()
+    expr = torch.rand(B, N_GENES)
+    pt_pred, _ = model.forward_supervised(expr, _make_anchor())
+    assert (pt_pred > 0.0).all() and (pt_pred < 1.0).all()
+
+
+def test_forward_supervised_comp_sums_to_one():
+    model = _make_model()
+    expr = torch.rand(B, N_GENES)
+    _, comp_pred = model.forward_supervised(expr, _make_anchor())
+    assert torch.allclose(comp_pred.sum(dim=-1), torch.ones(B), atol=1e-5)
+
+
+def test_forward_supervised_bypasses_tf_icl():
+    """tf_icl must not be called during forward_supervised."""
+    from unittest.mock import patch
+    model = _make_model()
+    expr = torch.rand(B, N_GENES)
+    with patch.object(model.tf_icl, "forward", side_effect=AssertionError("tf_icl called")):
+        model.forward_supervised(expr, _make_anchor())   # must not raise
+
+
+def test_forward_supervised_is_differentiable():
+    model = _make_model()
+    with torch.no_grad():
+        for m in model.modules():
+            if hasattr(m, "out_proj") and hasattr(m.out_proj, "weight"):
+                m.out_proj.weight.normal_(std=0.01)
+    expr = torch.rand(B, N_GENES)
+    pt_pred, comp_pred = model.forward_supervised(expr, _make_anchor())
+    pt_target = torch.rand(B)
+    sl_target = torch.softmax(torch.rand(B, K), dim=-1)
+    loss = ((pt_pred - pt_target) ** 2).mean() + \
+           -(sl_target * torch.log(comp_pred + 1e-8)).sum(dim=-1).mean()
+    loss.backward()
+    head_params = list(model.shared_trunk.parameters()) + list(model.pseudotime_head.parameters())
+    assert any(p.grad is not None and p.grad.abs().sum() > 0 for p in head_params)
+
+
+def test_forward_supervised_dirichlet_model():
+    """forward_supervised also works when composition_loss_type='dirichlet'."""
+    from spatialmt.model.tabgrn import TabICLRegressor
+    model = TabICLRegressor(
+        n_genes=N_GENES, k=K, embed_dim=EMBED_DIM, n_heads=N_HEADS,
+        num_cls=NUM_CLS, col_num_inds=COL_NUM_INDS,
+        n_layers_col=N_LAYERS, n_layers_row=N_LAYERS, n_layers_icl=N_LAYERS,
+        composition_loss_type="dirichlet",
+    )
+    expr = torch.rand(B, N_GENES)
+    pt_pred, alpha = model.forward_supervised(expr, _make_anchor())
+    assert pt_pred.shape == (B,)
+    assert alpha.shape == (B, K)
+    assert (alpha > 0).all()

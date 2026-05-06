@@ -134,6 +134,7 @@ class ModelConfig:
     output_head_init_bias: float = 0.5   # PseudotimeHead bias → sigmoid(0.5)≈0.62
     output_head_init_std: float = 0.01   # near-zero weight init for both heads
     bio_plausibility_passed: Optional[bool] = None  # populated post-training
+    supervised_batch_size: int = 64      # mini-batch size for SupervisedTrainer
     # "kl" = KL-divergence CompositionHead (rotation_001)
     # "dirichlet" = Dirichlet NLL DirichletCompositionHead (rotation_002)
     composition_loss_type: str = "kl"
