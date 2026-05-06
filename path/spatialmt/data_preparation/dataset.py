@@ -40,6 +40,7 @@ class ProcessedDataset:
     soft_labels: np.ndarray       # (n_cells, K), float32, rows sum to 1.0
     cell_type_categories: list[str]  # sorted class3 label names; index i → soft_labels[:, i]
     manifest_hash: str            # SHA-256 of sorted(gene_names)
+    centroid_distances: np.ndarray  # (K, K), float32, L2 distances between PCA centroids
 
     def __post_init__(self) -> None:
         # Cast expression to float32 if float64 supplied
@@ -106,6 +107,14 @@ class ProcessedDataset:
             raise ValueError(
                 f"soft_labels rows must sum to 1.0 ± 1e-5. "
                 f"Max deviation: {np.abs(row_sums - 1.0).max():.2e}."
+            )
+
+        # --- centroid_distances ---
+        k = self.soft_labels.shape[1]
+        if self.centroid_distances.shape != (k, k):
+            raise ValueError(
+                f"centroid_distances must be ({k}, {k}), "
+                f"got {self.centroid_distances.shape}."
             )
 
     # ------------------------------------------------------------------
@@ -295,6 +304,9 @@ class ProcessedDataset:
 
         soft_labels = cls._compute_soft_labels(expression_pca, centroids, config)
 
+        diff_c = centroids[:, np.newaxis, :] - centroids[np.newaxis, :, :]
+        centroid_distances = np.linalg.norm(diff_c, axis=2).astype(np.float32)  # (K, K)
+
         return cls(
             expression=X,
             gene_names=gene_names,
@@ -306,4 +318,5 @@ class ProcessedDataset:
             soft_labels=soft_labels,
             cell_type_categories=categories,
             manifest_hash=cls._compute_manifest_hash(gene_names),
+            centroid_distances=centroid_distances,
         )

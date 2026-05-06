@@ -246,30 +246,40 @@ def _inference_check(
     builder: CellTableBuilder,
     device: torch.device,
 ) -> None:
-    """Run one forward pass with a day-11 query cell and print predictions.
+    """Evaluate over all day-11 held-out cells and report dual-head metrics.
 
     Day 11 is the held-out test set — these cells were never used as queries
     during training, so this is the first time the model sees them.
+
+    Pseudotime head : Spearman ρ (primary), per-day ρ (diagnostic), MAE (error).
+    Composition head: Wasserstein EMD (primary), Brier score (diagnostic), JSD (error).
+    Wasserstein baseline printed alongside EMD for null-model reference.
     """
     from spatialmt.context.collate import icl_collate
+    from spatialmt.eval.metrics import (
+        brier_score,
+        jsd,
+        mae,
+        per_day_spearman,
+        spearman_r,
+        wasserstein_1,
+        wasserstein_baseline,
+    )
+    from spatialmt.training.trainer import _batch_to_device
 
     print("\n" + "=" * 60)
-    print("Inference check — day 11 query cell")
+    print("Inference check — day 11 held-out cells")
 
-    day11_ids = [
-        cid for cid, day in zip(dataset.cell_ids, dataset.collection_day)
-        if int(day) == 11
-    ]
+    day11_mask = dataset.collection_day == 11
+    day11_ids  = [cid for cid, m in zip(dataset.cell_ids, day11_mask) if m]
+
     if not day11_ids:
         print("  No day-11 cells found in dataset — skipping.")
         return
 
-    query_id = day11_ids[0]
-    q_idx    = dataset.cell_ids.index(query_id)
-
     cats = dataset.cell_type_categories
 
-    # Per-day pseudotime summary (median) to check biological plausibility
+    # Per-day pseudotime medians — biological plausibility check
     print("\n  Pseudotime medians by collection day:")
     for day in [5, 7, 11, 16, 21, 30]:
         mask = dataset.collection_day == day
@@ -277,33 +287,80 @@ def _inference_check(
             med = float(np.median(dataset.pseudotime[mask]))
             print(f"    D{day:>2d} : {med:.4f}  (n={mask.sum()})")
 
-    print(f"\n  query cell      : {query_id}")
-    print(f"  true pseudotime : {dataset.pseudotime[q_idx]:.4f}")
-    true_comp = dataset.soft_labels[q_idx]
-    comp_str = "  |  ".join(f"{cats[i]}: {v:.3f}" for i, v in enumerate(true_comp))
-    print(f"  true composition:\n    {comp_str}")
-
-    anchor_ids, _ = sampler.sample(query_id)
-    table, _      = builder.build(query_id, anchor_ids)
-    batch         = icl_collate([(table, _)])
-
-    # Move to device
-    from spatialmt.training.trainer import _batch_to_device
-    batch = _batch_to_device(batch, device)
-
+    # Forward pass over all day-11 cells
+    print(f"\n  Running forward pass over {len(day11_ids)} day-11 cells ...")
     model.eval()
+    pt_preds:   list[float] = []
+    comp_preds: list[list[float]] = []
+
     with torch.no_grad():
-        pt_pred, comp_pred = model(batch)
+        for cid in day11_ids:
+            anchor_ids, _ = sampler.sample(cid)
+            table, label  = builder.build(cid, anchor_ids)
+            batch         = icl_collate([(table, label)])
+            batch         = _batch_to_device(batch, device)
+            pt_out, comp_out = model(batch)
+            pt_preds.append(pt_out[0].item())
+            comp_preds.append(comp_out[0].cpu().tolist())
+
     model.train()
 
-    pt_val   = pt_pred[0].item()
-    comp_val = comp_pred[0].cpu().tolist()
+    pt_pred_arr   = np.array(pt_preds,  dtype=np.float32)
+    comp_pred_arr = np.array(comp_preds, dtype=np.float32)
 
-    pred_comp_str = "  |  ".join(f"{cats[i]}: {v:.3f}" for i, v in enumerate(comp_val))
-    print(f"\n  pred pseudotime : {pt_val:.4f}")
+    day11_indices  = [dataset.cell_ids.index(cid) for cid in day11_ids]
+    pt_true_arr    = dataset.pseudotime[day11_indices]
+    comp_true_arr  = dataset.soft_labels[day11_indices]
+    day11_days_arr = dataset.collection_day[day11_indices]
+
+    train_mask = dataset.collection_day != 11
+
+    # --- Pseudotime metrics ---
+    rho       = spearman_r(pt_pred_arr, pt_true_arr)
+    pt_mae    = mae(pt_pred_arr, pt_true_arr)
+    day_rho   = per_day_spearman(pt_pred_arr, pt_true_arr, day11_days_arr)
+
+    # --- Composition metrics ---
+    cost_m    = dataset.centroid_distances.astype(np.float64)
+    emds      = [
+        wasserstein_1(
+            comp_pred_arr[i].astype(np.float64),
+            comp_true_arr[i].astype(np.float64),
+            cost_m,
+        )
+        for i in range(len(day11_ids))
+    ]
+    mean_emd  = float(np.mean(emds))
+    baseline  = wasserstein_baseline(dataset.soft_labels, train_mask, cost_m)
+    bs_mean, bs_per_class = brier_score(comp_pred_arr, comp_true_arr)
+    js        = jsd(comp_pred_arr, comp_true_arr)
+
+    # --- Print summary ---
+    print("\n  -- Pseudotime head --")
+    print(f"  Spearman ρ   : {rho:+.4f}   (primary accuracy)")
+    print(f"  MAE          : {pt_mae:.4f}   (error magnitude)")
+    if day_rho:
+        print("  per-day ρ    :", "  ".join(f"D{d}: {v:+.3f}" for d, v in sorted(day_rho.items())))
+
+    print("\n  -- Composition head --")
+    print(f"  Wasserstein  : {mean_emd:.4f}   (primary accuracy, PCA ground metric)")
+    print(f"  W. baseline  : {baseline:.4f}   (null model — training mean composition)")
+    print(f"  Brier score  : {bs_mean:.4f}   (diagnostic)")
+    bs_str = "  ".join(f"{cats[i]}: {v:.4f}" for i, v in enumerate(bs_per_class))
+    print(f"  Brier/class  : {bs_str}")
+    print(f"  JSD          : {js:.4f}   (error, bounded [0,1])")
+
+    # Qualitative example — first day-11 cell
+    print("\n  -- Example: first day-11 cell --")
+    true_comp_str = "  |  ".join(f"{cats[i]}: {v:.3f}" for i, v in enumerate(comp_true_arr[0]))
+    pred_comp_str = "  |  ".join(f"{cats[i]}: {v:.3f}" for i, v in enumerate(comp_pred_arr[0]))
+    print(f"  cell id         : {day11_ids[0]}")
+    print(f"  true pseudotime : {pt_true_arr[0]:.4f}")
+    print(f"  pred pseudotime : {pt_pred_arr[0]:.4f}  (|error| {abs(pt_pred_arr[0] - pt_true_arr[0]):.4f})")
+    print(f"  true composition:\n    {true_comp_str}")
     print(f"  pred composition:\n    {pred_comp_str}")
-    print(f"  |pt error|      : {abs(pt_val - dataset.pseudotime[q_idx]):.4f}")
-    print(f"  n context cells : {len(anchor_ids)}")
+    anchor_ids_ex, _ = sampler.sample(day11_ids[0])
+    print(f"  n context cells : {len(anchor_ids_ex)}")
     print("=" * 60)
 
 
