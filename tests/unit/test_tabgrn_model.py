@@ -100,101 +100,26 @@ def _make_model(
 
 
 # ---------------------------------------------------------------------------
-# Import sanity
-# ---------------------------------------------------------------------------
-
-def test_import_tabgrn_regressor():
-    from spatialmt.model.tabgrn import TabICLRegressor
-    assert TabICLRegressor is not None
-
-
-def test_import_attention_scorer():
-    from spatialmt.model.tabgrn import AttentionScorer
-    assert AttentionScorer is not None
-
-
-def test_import_custom_sub_modules():
-    from spatialmt.model.tabgrn import (
-        AnchorLabelEmbedder,
-        SharedTrunk,
-        PseudotimeHead,
-        CompositionHead,
-    )
-
-
-def test_import_tabgrn_backbone_classes():
-    """TabICLv2 backbone classes must be importable from the tabicl package."""
-    from tabicl.model.embedding import ColEmbedding
-    from tabicl.model.interaction import RowInteraction
-    from tabicl.model.encoders import Encoder
-    assert ColEmbedding is not None
-    assert RowInteraction is not None
-    assert Encoder is not None
-
-
-# ---------------------------------------------------------------------------
 # TabICLRegressor — construction
 # ---------------------------------------------------------------------------
 
-def test_model_is_nn_module():
+def test_model_construction():
     import torch.nn as nn
+    from tabicl.model.embedding import ColEmbedding
+    from tabicl.model.interaction import RowInteraction
+    from tabicl.model.encoders import Encoder
+    from spatialmt.model.tabgrn import (
+        AnchorLabelEmbedder, SharedTrunk, PseudotimeHead, CompositionHead,
+    )
     model = _make_model()
     assert isinstance(model, nn.Module)
-
-
-def test_model_has_col_embedder():
-    from tabicl.model.embedding import ColEmbedding
-    model = _make_model()
-    assert hasattr(model, "col_embedder")
     assert isinstance(model.col_embedder, ColEmbedding)
-
-
-def test_model_has_row_interactor():
-    from tabicl.model.interaction import RowInteraction
-    model = _make_model()
-    assert hasattr(model, "row_interactor")
     assert isinstance(model.row_interactor, RowInteraction)
-
-
-def test_model_has_tf_icl():
-    """tf_icl must be a tabicl.model.encoders.Encoder (pretrained ICL transformer)."""
-    from tabicl.model.encoders import Encoder
-    model = _make_model()
-    assert hasattr(model, "tf_icl")
     assert isinstance(model.tf_icl, Encoder)
-
-
-def test_model_has_anchor_label_embedder():
-    from spatialmt.model.tabgrn import AnchorLabelEmbedder
-    model = _make_model()
-    assert hasattr(model, "anchor_label_embedder")
     assert isinstance(model.anchor_label_embedder, AnchorLabelEmbedder)
-
-
-def test_model_has_shared_trunk():
-    from spatialmt.model.tabgrn import SharedTrunk
-    model = _make_model()
-    assert hasattr(model, "shared_trunk")
     assert isinstance(model.shared_trunk, SharedTrunk)
-
-
-def test_model_has_pseudotime_head():
-    from spatialmt.model.tabgrn import PseudotimeHead
-    model = _make_model()
-    assert hasattr(model, "pseudotime_head")
     assert isinstance(model.pseudotime_head, PseudotimeHead)
-
-
-def test_model_has_composition_head():
-    from spatialmt.model.tabgrn import CompositionHead
-    model = _make_model()
-    assert hasattr(model, "composition_head")
     assert isinstance(model.composition_head, CompositionHead)
-
-
-def test_model_has_no_icl_attention():
-    """ICLAttention removed — replaced by pretrained tf_icl Encoder."""
-    model = _make_model()
     assert not hasattr(model, "icl_attention")
 
 
@@ -691,29 +616,16 @@ def test_parameter_groups_lr_values():
     assert groups["head"] == pytest.approx(cfg.lr_head)
 
 
-def test_parameter_groups_cover_all_parameters():
-    """Every model parameter must appear in exactly one group."""
+def test_parameter_groups_cover_all_parameters_exactly_once():
+    """Every model parameter appears in exactly one group — no overlap, no gaps."""
     model = _make_model()
     groups = model.parameter_groups()
-    grouped_ids = set()
+    grouped_ids: set[int] = set()
     for g in groups:
         for p in g["params"]:
-            pid = id(p)
-            assert pid not in grouped_ids, f"Parameter appears in multiple groups"
-            grouped_ids.add(pid)
-    all_ids = {id(p) for p in model.parameters()}
-    assert all_ids == grouped_ids
-
-
-def test_parameter_groups_no_overlap():
-    """No parameter may appear in more than one group."""
-    model = _make_model()
-    groups = model.parameter_groups()
-    seen = set()
-    for g in groups:
-        for p in g["params"]:
-            assert id(p) not in seen, f"Parameter appears in multiple groups"
-            seen.add(id(p))
+            assert id(p) not in grouped_ids, "Parameter appears in multiple groups"
+            grouped_ids.add(id(p))
+    assert grouped_ids == {id(p) for p in model.parameters()}
 
 
 def test_parameter_groups_no_empty_group():

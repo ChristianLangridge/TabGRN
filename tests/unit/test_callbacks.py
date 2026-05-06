@@ -149,34 +149,12 @@ class TestCheckpointContents:
         trainer.fit()
         return torch.load(tmp_path / "step_000001.pt", map_location="cpu", weights_only=True)
 
-    def test_has_global_step(self, ckpt):
-        assert "global_step" in ckpt
-
-    def test_global_step_value(self, ckpt):
+    def test_checkpoint_structure(self, ckpt):
         assert ckpt["global_step"] == 1
-
-    def test_has_model_state(self, ckpt):
-        assert "model_state" in ckpt
-
-    def test_model_state_is_dict(self, ckpt):
-        assert isinstance(ckpt["model_state"], dict)
-
-    def test_has_optimizer_state(self, ckpt):
-        assert "optimizer_state" in ckpt
-
-    def test_optimizer_state_is_dict(self, ckpt):
+        assert isinstance(ckpt["model_state"], dict) and len(ckpt["model_state"]) > 0
         assert isinstance(ckpt["optimizer_state"], dict)
-
-    def test_has_loss_fn_state(self, ckpt):
-        assert "loss_fn_state" in ckpt
-
-    def test_loss_fn_state_contains_kendall_sigmas(self, ckpt):
-        keys = ckpt["loss_fn_state"].keys()
-        assert "log_sigma_sq_pt" in keys
-        assert "log_sigma_sq_comp" in keys
-
-    def test_model_state_keys_nonempty(self, ckpt):
-        assert len(ckpt["model_state"]) > 0
+        assert "log_sigma_sq_pt"   in ckpt["loss_fn_state"]
+        assert "log_sigma_sq_comp" in ckpt["loss_fn_state"]
 
 
 # ---------------------------------------------------------------------------

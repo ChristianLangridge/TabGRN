@@ -1,28 +1,4 @@
-"""
-spatialmt.training.trainer — Fine-tuning loop for TabGRN-ICL.
-
-Design note — amortized inference / ICL
-----------------------------------------
-TabGRN uses a pretrained in-context learning backbone. Each training step
-constructs a fresh (query_cell, context_cells) pair via ContextSampler and
-CellTableBuilder; the model's forward pass *is* the inference step.
-
-There is no epoch concept here — the training data is not a fixed dataset being
-iterated. Instead, each step draws a stochastically sampled ICL pair (query cell
-+ context), so the loop is simply a flat step budget (`n_steps`). Callbacks for
-periodic evaluation or checkpointing fire every `eval_every` steps.
-
-"Training" here means gradient-descent fine-tuning:
-  • The dual-head stack (PseudotimeHead, CompositionHead) is always trainable.
-  • col_embedder (gene×gene attention) is frozen for `warmup_col_steps` steps;
-    its random init would perturb the pretrained backbone before the embeddings
-    stabilise.
-  • tf_icl (pretrained ICL transformer) is frozen for `warmup_icl_steps` steps.
-  • row_interactor and anchor_label_embedder are unfrozen from step 0.
-
-Day 11 cells are the held-out test set. They are excluded from the fine-tuning query pool;
-ContextSampler already excludes them from the anchor pool.
-"""
+"""spatialmt.training.trainer — ICL fine-tuning (Trainer) and supervised fine-tuning (SupervisedTrainer)."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -45,22 +21,7 @@ _WITHHELD_DAY: int = 11
 
 
 class MuonAdamW:
-    """Combined Muon + AdamW optimizer.
-
-    Routes each parameter to the appropriate sub-optimizer based on ndim:
-      ndim >= 2  →  Muon  (weight matrices: attention projections, FC weights)
-      ndim <  2  →  AdamW (biases, layer-norm scales, scalars)
-
-    The ``param_groups`` attribute exposes the original *logical* groups
-    (col, row, icl, head, loss) for LR inspection and scheduling.  The
-    internal sub-optimizers each have their own split groups.
-
-    Parameters
-    ----------
-    param_groups : list[dict]
-        Each dict must have 'params' (list of tensors) and 'lr' (float).
-        An optional 'name' key is preserved for test introspection.
-    """
+    """Combined Muon + AdamW: ndim >= 2 → Muon, ndim < 2 → AdamW."""
 
     def __init__(self, param_groups: list[dict]) -> None:
         self.param_groups = param_groups
@@ -118,25 +79,9 @@ def _batch_to_device(batch: ICLBatch, device: torch.device) -> ICLBatch:
 
 
 class Trainer:
-    """Fine-tunes TabICLRegressor on the pseudotime + composition dual-head task.
+    """ICL fine-tuning loop. Each step draws a fresh stochastic (query, context) pair.
 
-    Parameters
-    ----------
-    model : TabICLRegressor
-    dataset : ProcessedDataset
-    sampler : ContextSampler
-    builder : CellTableBuilder
-    loss_fn : DualHeadLoss
-    config : ExperimentConfig
-    n_steps : int
-        Total number of gradient update steps.  Each step draws a fresh ICL
-        sample (query cell + stochastic context).  There is no epoch concept —
-        the training data is not a fixed dataset.
-    eval_every : int
-        Callbacks are invoked every ``eval_every`` steps for periodic
-        evaluation or checkpointing.
-    callbacks : list
-        Objects with an ``on_epoch_end(model, dataset, step)`` method.
+    Day-11 cells are excluded from the query pool — they are the held-out test set.
     """
 
     def __init__(
@@ -176,14 +121,6 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _make_optimizer(self) -> "MuonAdamW":
-        """Muon (weight matrices) + AdamW (biases / norms / scalars).
-
-        The 4 model parameter groups and 1 loss group are preserved as logical
-        groups on the returned MuonAdamW object.  Within each group, ndim >= 2
-        parameters go to the Muon sub-optimizer; ndim < 2 parameters go to
-        AdamW.  The Kendall uncertainty parameters (log_sigma_sq_*) are 0-dim
-        scalars and always route to AdamW.
-        """
         model_groups = self.model.parameter_groups()
         loss_group = {
             "name": "loss",
@@ -197,12 +134,6 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _apply_warmup_freeze(self, global_step: int) -> None:
-        """Freeze or unfreeze col_embedder and tf_icl based on global_step.
-
-        col_embedder : frozen while global_step < warmup_col_steps
-        tf_icl       : frozen while global_step < warmup_icl_steps
-        All other parameters (row_interactor, heads) are always trainable.
-        """
         cfg = self.config.model
 
         col_frozen = global_step < cfg.warmup_col_steps
@@ -218,20 +149,7 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def fit(self) -> dict:
-        """Run fine-tuning and return averaged metrics plus per-interval loss history.
-
-        Each step draws a fresh (query_cell, context_cells) ICL pair —
-        there is no epoch boundary.  Callbacks fire every ``eval_every`` steps.
-
-        Returns
-        -------
-        dict with keys:
-            "train_loss"   — Kendall uncertainty-weighted total loss (run average)
-            "pt_loss"      — raw MSE component (run average)
-            "comp_loss"    — raw KL divergence component (run average)
-            "loss_history" — list of dicts, one per eval_every interval:
-                             {"step", "train_loss", "pt_loss", "comp_loss"}
-        """
+        """Run fine-tuning. Returns dict: train_loss, pt_loss, comp_loss, loss_history."""
         self.optimizer = self._make_optimizer()
         optimizer = self.optimizer
         device = next(self.model.parameters()).device
@@ -244,7 +162,6 @@ class Trainer:
         for _ in range(self.n_steps):
             self._apply_warmup_freeze(self.global_step)
 
-            # Draw a fresh ICL sample — stochastic context, no fixed dataset
             query_id = str(rng.choice(self._query_pool))
             anchor_ids, _ = self.sampler.sample(query_id)
             table, targets = self.builder.build(query_id, anchor_ids)
@@ -296,26 +213,9 @@ class Trainer:
 # ---------------------------------------------------------------------------
 
 class SupervisedTrainer:
-    """Fine-tunes col_embedder, row_interactor, and output heads via batched
-    supervised learning on all non-day-11 cells.
+    """Batched supervised fine-tuning on all non-day-11 cells.
 
-    tf_icl is permanently frozen at construction and excluded from the
-    optimizer.  After fine-tuning, the pretrained tf_icl is used as-is at
-    inference time to perform within-day-11 ICL — the fine-tuned upstream
-    layers provide biology-aware gene representations.
-
-    Parameters
-    ----------
-    model : TabICLRegressor
-    dataset : ProcessedDataset
-    loss_fn : DualHeadLoss | DirichletDualHeadLoss
-    config : ExperimentConfig
-    n_epochs : int
-        Number of full passes over the non-day-11 cell pool.
-    eval_every : int
-        Callbacks fire and loss is recorded every ``eval_every`` steps.
-    callbacks : list | None
-    seed : int | None
+    tf_icl is permanently frozen and excluded from the optimizer.
     """
 
     def __init__(
@@ -370,12 +270,7 @@ class SupervisedTrainer:
         # tf_icl always frozen — never re-enabled
 
     def fit(self) -> dict:
-        """Run supervised fine-tuning and return averaged metrics.
-
-        Returns
-        -------
-        dict with keys: train_loss, pt_loss, comp_loss, loss_history
-        """
+        """Run supervised fine-tuning. Returns dict: train_loss, pt_loss, comp_loss, loss_history."""
         self.optimizer = self._make_optimizer()
         optimizer = self.optimizer
         device = next(self.model.parameters()).device

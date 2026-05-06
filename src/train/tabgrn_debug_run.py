@@ -58,7 +58,7 @@ H5AD_PATH = os.environ.get(
 )
 # BACKBONE env var overrides cfg.model.backbone_path.
 # Leave unset to use the path stored in the preset config.
-_BACKBONE_OVERRIDE = os.environ.get("tabicl-regressor-v2-20260212.ckpt", None)
+_BACKBONE_OVERRIDE = os.environ.get("BACKBONE", None)
 
 _seed_str = os.environ.get("SEED", str(SEED))
 SEED = int(_seed_str) if _seed_str else None

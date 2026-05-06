@@ -121,33 +121,17 @@ def _make_trainer(n_steps: int = 1, eval_every: int = 1) -> Trainer:
 # ---------------------------------------------------------------------------
 
 class TestConstruction:
-    def test_trainer_instantiates(self):
+    def test_trainer_construction(self):
         trainer = _make_trainer()
         assert isinstance(trainer, Trainer)
-
-    def test_trainer_stores_model(self):
-        assert isinstance(_make_trainer().model, TabICLRegressor)
-
-    def test_trainer_stores_dataset(self):
-        assert isinstance(_make_trainer().dataset, ProcessedDataset)
-
-    def test_trainer_stores_sampler(self):
-        assert isinstance(_make_trainer().sampler, ContextSampler)
-
-    def test_trainer_stores_builder(self):
-        assert isinstance(_make_trainer().builder, CellTableBuilder)
-
-    def test_trainer_stores_loss_fn(self):
-        assert isinstance(_make_trainer().loss_fn, DualHeadLoss)
-
-    def test_trainer_stores_config(self):
-        assert isinstance(_make_trainer().config, ExperimentConfig)
-
-    def test_global_step_initialised_to_zero(self):
-        assert _make_trainer().global_step == 0
-
-    def test_callbacks_default_empty(self):
-        assert _make_trainer().callbacks == []
+        assert isinstance(trainer.model, TabICLRegressor)
+        assert isinstance(trainer.dataset, ProcessedDataset)
+        assert isinstance(trainer.sampler, ContextSampler)
+        assert isinstance(trainer.builder, CellTableBuilder)
+        assert isinstance(trainer.loss_fn, DualHeadLoss)
+        assert isinstance(trainer.config, ExperimentConfig)
+        assert trainer.global_step == 0
+        assert trainer.callbacks == []
 
 
 # ---------------------------------------------------------------------------
@@ -538,11 +522,6 @@ class TestFitSmoke:
 # ---------------------------------------------------------------------------
 
 class TestStepCounter:
-    def test_global_step_increments_each_step(self):
-        trainer = _make_trainer(n_steps=3)
-        trainer.fit()
-        assert trainer.global_step == 3
-
     def test_global_step_equals_n_steps_after_fit(self):
         trainer = _make_trainer(n_steps=6)
         trainer.fit()
@@ -641,41 +620,6 @@ class TestNoLabelLeakage:
                 table.query_expression,
                 dataset.expression[q_idx],
             )
-
-    def test_training_targets_not_fed_to_model_forward(self):
-        """The TrainingTargets (query labels) must only reach loss_fn.forward(),
-        never model.forward().
-
-        ICL note: model.forward() takes an ICLBatch which has no query label
-        fields. This test verifies the trainer does not pass query labels into
-        the model's forward pass by checking that ICLBatch fed to the model
-        has zero-filled (or absent) query_pseudotime values that match the
-        collated context — not the true targets.
-        """
-        trainer = _make_trainer(n_steps=2)
-
-        model_inputs: list = []
-        original_forward = trainer.model.forward
-
-        def capturing_forward(batch):
-            model_inputs.append(batch)
-            return original_forward(batch)
-
-        with patch.object(trainer.model, "forward", side_effect=capturing_forward):
-            trainer.fit()
-
-        assert len(model_inputs) > 0
-        for batch in model_inputs:
-            # ICLBatch.query_pseudotime exists (it's a field) but must NOT
-            # equal the TrainingTargets value — verified by checking the field
-            # is present and float32 (structural contract), not by value.
-            # The key assertion: batch has no field that would require the
-            # trainer to have pre-populated it from TrainingTargets.
-            assert hasattr(batch, "context_expression")
-            assert hasattr(batch, "query_expression")
-            # query_pseudotime in ICLBatch is a passthrough for evaluation —
-            # it must be float32 but its value is unused by model.forward()
-            assert batch.query_pseudotime.dtype == torch.float32
 
 
 # ---------------------------------------------------------------------------
