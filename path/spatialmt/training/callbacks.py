@@ -7,10 +7,11 @@ from typing import TYPE_CHECKING
 import torch
 
 if TYPE_CHECKING:
+    from typing import Optional, Union
     from spatialmt.data_preparation.dataset import ProcessedDataset
     from spatialmt.model.loss import DualHeadLoss
     from spatialmt.model.tabgrn import TabICLRegressor
-    from spatialmt.training.trainer import Trainer
+    from spatialmt.training.trainer import Trainer, SupervisedTrainer
 
 
 class CheckpointCallback:
@@ -18,8 +19,9 @@ class CheckpointCallback:
 
     Parameters
     ----------
-    trainer : Trainer
-        The active Trainer instance — provides optimizer and global_step.
+    trainer : Trainer | SupervisedTrainer | None
+        The active trainer — provides optimizer and global_step.
+        May be set to None at construction and assigned before fit() runs.
     loss_fn : DualHeadLoss
         The loss function whose Kendall sigma parameters are also saved.
     out_dir : Path
@@ -30,7 +32,7 @@ class CheckpointCallback:
 
     def __init__(
         self,
-        trainer: "Trainer",
+        trainer: "Optional[Union[Trainer, SupervisedTrainer]]",
         loss_fn: "DualHeadLoss",
         out_dir: Path,
         every: int = 1000,

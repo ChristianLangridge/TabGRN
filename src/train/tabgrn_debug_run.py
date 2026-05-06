@@ -199,8 +199,10 @@ def _sanity_checks(
 
     print("\nSanity checks:")
 
-    # Loss values finite
+    # Scalar loss values finite
     for k, v in metrics.items():
+        if not isinstance(v, (int, float)):
+            continue
         tag = "OK  " if math.isfinite(v) else "FAIL"
         print(f"  {tag}  {k} = {v:.4f}")
 
@@ -222,6 +224,19 @@ def _sanity_checks(
     head_ok = all(p.requires_grad for p in model.pseudotime_head.parameters())
     tag = "OK  " if head_ok else "FAIL"
     print(f"  {tag}  pseudotime_head trainable")
+
+    # Loss progression
+    history = metrics.get("loss_history", [])
+    if history:
+        print("\n  Loss progression:")
+        print(f"  {'step':>6}  {'total':>8}  {'pt':>8}  {'comp':>8}")
+        for entry in history:
+            print(
+                f"  {entry['step']:>6d}  "
+                f"{entry['train_loss']:>8.4f}  "
+                f"{entry['pt_loss']:>8.4f}  "
+                f"{entry['comp_loss']:>8.4f}"
+            )
 
 
 def _inference_check(

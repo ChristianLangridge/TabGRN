@@ -414,6 +414,41 @@ class ExperimentConfig:
         )
 
     @classmethod
+    def icl_warmup_preset(
+        cls,
+        run_id: str,
+        composition_loss_type: str = "kl",
+        n_warmup_steps: int = 1000,
+    ) -> "ExperimentConfig":
+        """Config for Phase 1.5 ICL warm-up — trains anchor_label_embedder only.
+
+        tf_icl stays permanently frozen (warmup_icl_steps > n_warmup_steps).
+        col_embedder is immediately trainable (warmup_col_steps=0) since it was
+        already fine-tuned in Phase 1.
+        """
+        tier = HARDWARE_TIERS["full"]
+        model_cfg = cls._pretrained_model_config()
+        model_cfg.composition_loss_type = composition_loss_type
+        model_cfg.warmup_col_steps = 0
+        model_cfg.warmup_icl_steps = n_warmup_steps + 1  # never unfreezes
+        return cls(
+            run_id=run_id,
+            data=DataConfig(
+                max_genes=tier["max_genes"],
+                hardware_tier="full",
+            ),
+            context=ContextConfig(
+                n_bins=10,
+                cells_per_bin=10,
+                max_context_cells=tier["max_context_cells"],
+            ),
+            model=model_cfg,
+            explainability=ExplainabilityConfig(),
+            perturbation=PerturbationConfig(),
+            benchmark=BenchmarkConfig(),
+        )
+
+    @classmethod
     def scratch_preset(cls, run_id: str = "scratch") -> "ExperimentConfig":
         """No pretrained weights — random init ablation [Phase 6]."""
         tier = HARDWARE_TIERS["standard"]

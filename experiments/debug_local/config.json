@@ -32,7 +32,9 @@
     "warmup_icl_steps": 100,
     "output_head_init_bias": 0.5,
     "output_head_init_std": 0.01,
-    "bio_plausibility_passed": null
+    "bio_plausibility_passed": null,
+    "supervised_batch_size": 64,
+    "composition_loss_type": "kl"
   },
   "explainability": {
     "shap_background_size": 100,

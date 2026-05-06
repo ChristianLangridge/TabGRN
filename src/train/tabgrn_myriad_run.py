@@ -3,15 +3,9 @@ tabgrn_myriad_run.py — Full training run for TabGRN on Myriad HPC (Option B).
 
 Training strategy
 -----------------
-Phase 1 — Supervised fine-tuning (this script):
-  col_embedder, row_interactor, and the dual output heads are fine-tuned via
-  standard mini-batch gradient descent on ALL non-day-11 cells.  tf_icl is
-  permanently frozen and excluded from the optimizer.
-
-Phase 2 — ICL inference (separate eval script):
-  The fine-tuned model is loaded and run in full ICL mode against day-11 cells:
-  context = other day-11 cells (pseudotime + soft_labels provided as anchors),
-  query   = one day-11 cell (labels withheld).
+Phase 1 — Supervised fine-tuning on all non-day-11 cells; tf_icl frozen.
+Phase 1.5 — ICL warm-up; trains anchor_label_embedder with tf_icl still frozen.
+Phase 2 — ICL inference on day-11 queries (separate eval script).
 
 Two experimental presets selected by the RUN_PRESET env var:
 
@@ -45,15 +39,18 @@ from spatialmt.config.paths import PROJECT_ROOT
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DirichletDualHeadLoss, DualHeadLoss
 from spatialmt.model.tabgrn import TabICLRegressor
+from spatialmt.context.builder import CellTableBuilder
+from spatialmt.context.sampler import ContextSampler
 from spatialmt.training.callbacks import CheckpointCallback
-from spatialmt.training.trainer import SupervisedTrainer
+from spatialmt.training.trainer import SupervisedTrainer, Trainer
 
 # ---------------------------------------------------------------------------
 # Run settings
 # ---------------------------------------------------------------------------
 
-N_EPOCHS = int(os.environ.get("N_EPOCHS", "3"))
-SEED     = int(os.environ.get("SEED", "42"))
+N_EPOCHS           = int(os.environ.get("N_EPOCHS", "3"))
+N_ICL_WARMUP_STEPS = int(os.environ.get("N_ICL_WARMUP_STEPS", "1000"))
+SEED               = int(os.environ.get("SEED", "42"))
 
 _RUN_PRESET = os.environ.get("RUN_PRESET", "kl").lower()
 if _RUN_PRESET not in {"kl", "dirichlet"}:
@@ -118,7 +115,7 @@ def main() -> None:
     # 1. Data
     print("\n[1/3] Loading data ...")
     t0 = time.time()
-    dataset = ProcessedDataset.from_anndata(H5AD_PATH, cfg.data)
+    dataset = ProcessedDataset.from_anndata(H5AD_PATH, cfg.data)  # type: ignore[arg-type]
     print(
         f"  {dataset.n_cells} cells  |  {dataset.n_genes} genes  "
         f"({time.time() - t0:.1f}s)"
@@ -216,7 +213,53 @@ def main() -> None:
         },
         final_path,
     )
-    print(f"\nFinal model saved to {final_path}")
+    print(f"\nPhase 1 model saved to {final_path}")
+
+    # Phase 1.5 — ICL warm-up: train anchor_label_embedder with tf_icl frozen
+    print(f"\n[Phase 1.5] ICL warm-up for {N_ICL_WARMUP_STEPS} steps ...")
+    warmup_cfg = ExperimentConfig.icl_warmup_preset(
+        run_id=cfg.run_id + "_warmup",
+        composition_loss_type=m.composition_loss_type,
+        n_warmup_steps=N_ICL_WARMUP_STEPS,
+    )
+    warmup_ckpt_dir = PROJECT_ROOT / "experiments" / cfg.run_id / "warmup_checkpoints"
+    warmup_checkpoint_cb = CheckpointCallback(
+        trainer=None,
+        loss_fn=loss_fn,
+        out_dir=warmup_ckpt_dir,
+        every=N_ICL_WARMUP_STEPS // 2,
+    )
+    warmup_trainer = Trainer(
+        model      = model,
+        dataset    = dataset,
+        sampler    = ContextSampler(dataset, warmup_cfg.context),
+        builder    = CellTableBuilder(dataset),
+        loss_fn    = loss_fn,
+        config     = warmup_cfg,
+        n_steps    = N_ICL_WARMUP_STEPS,
+        eval_every = N_ICL_WARMUP_STEPS // 2,
+        callbacks  = [ProgressCallback(N_ICL_WARMUP_STEPS), warmup_checkpoint_cb],
+        seed       = SEED,
+    )
+    warmup_checkpoint_cb.trainer = warmup_trainer
+
+    t_warmup = time.time()
+    warmup_metrics = warmup_trainer.fit()
+    print(f"  ICL warm-up complete ({time.time() - t_warmup:.1f}s)  "
+          f"loss={warmup_metrics['train_loss']:.4f}")
+
+    warmup_ckpt_dir.mkdir(parents=True, exist_ok=True)
+    warmup_final_path = warmup_ckpt_dir / "warmup_final.pt"
+    torch.save(
+        {
+            "model_state":           model.state_dict(),
+            "run_id":                cfg.run_id,
+            "composition_loss_type": m.composition_loss_type,
+            "global_step":           warmup_trainer.global_step,
+        },
+        warmup_final_path,
+    )
+    print(f"Warm-up model saved to {warmup_final_path}")
 
     # Summary
     print("\n" + "=" * 60)
@@ -247,14 +290,14 @@ def main() -> None:
              f"Composition loss ({comp_label})"],
         ):
             ax.plot(steps, values, linewidth=1.5)
-            ax.set_xlabel("Epoch")
+            ax.set_xlabel("Step")
             ax.set_title(title)
             ax.grid(True, alpha=0.3)
 
         fig.suptitle(f"TabGRN training — {cfg.run_id}  [{comp_label}]", y=1.02)
         fig.tight_layout()
         curve_path = ckpt_dir / "loss_curve.png"
-        fig.savefig(curve_path, dpi=150, bbox_inches="tight")
+        fig.savefig(str(curve_path), dpi=150, bbox_inches="tight")
         plt.close(fig)
         print(f"Loss curve saved to {curve_path}")
 
