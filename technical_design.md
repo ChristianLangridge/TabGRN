@@ -117,6 +117,13 @@ The model operates on the Matrigel-only condition of the Jain et al. 2025 time-c
 
 **Pseudotime** is recomputed via diffusion map on the full trajectory (days 5–30), replacing the published DC1 which only covers days 5–11 neuroectodermal cells. Expression matrices from different batches (sampling data) were integrated with the Cluster Similarity Spectrum (CSS)  technique outlined by the Treutlein Lab. Diffusion pseudotime was then computed over the full trajectory excluding the unknown proliferating cell population (post-hoc labelled). Day 11 cell target labels (pseudotime and hard classification labels) are withheld from model training/context — they represent the neuroectoderm-to-neuroepithelial transition, the hardest interpolation point.
 
+D5  n= 5481  min=0.0000  p10=0.0179  median=0.1167  p90=0.2544  max=0.4087
+D7  n= 8183  min=0.0004  p10=0.0635  median=0.2534  p90=0.4193  max=0.5206
+D11  n= 4912  min=0.0083  p10=0.1649  median=0.3112  p90=0.4355  max=0.9109
+D16  n= 6571  min=0.0588  p10=0.5106  median=0.7128  p90=0.9021  max=0.9878
+D21  n= 7962  min=0.1546  p10=0.4885  median=0.7837  p90=0.9275  max=0.9987
+D30  n= 7950  min=0.2367  p10=0.5061  median=0.6526  p90=0.9791  max=1.0000
+
 **Perturbation validation** uses WLS and GLI3 as primary biological targets. WLS-KO (day 55) and GLI3-KO (day 45) datasets from Fleck et al. are **external GRN validation tools, not model inputs** — both are far outside the training distribution (days 5–30). Paired WT controls at the same timepoints enable WT vs. KO gene expression comparison to validate the attention-derived GRN. In-silico perturbation (zeroing target gene expression in training-distribution cells) tests whether the model's learned GRN captures regulatory relationships consistent with the real knockout biology. WLS knockout should primarily produce a **composition shift** away from non-telencephalic states.
 
 ---
