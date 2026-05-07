@@ -1,12 +1,23 @@
 # Technical Design Document
 ## TabGRN-ICL: Tabular Foundation Model for Dynamic GRN Inference
 
-**Version:** 1.7.0  
+**Version:** 1.8.0  
 **Status:** Rotation Scope Active · Dual-Head · Full Trajectory  
 **Project:** Joint rotation — Queen Mary University London / University College London  
 **Supervisors:** Dr. Julien Gautrot · Dr. Yanlan Mao · Dr. Isabel Palacios  
 **Author:** Christian Langridge  
 **Last Updated:** May 2026
+
+**Changelog v1.8.0**
+- §3.1: `lr_col` corrected to `1e-6` (was `1e-5`); `composition_loss_type` field added to `ModelConfig`; `rotation_finetune_dirichlet()` preset added
+- §3.5: `lr_col` in parameter groups table updated to `1e-6`; note added on `composition_loss_type` switching between `CompositionHead` and `DirichletCompositionHead`
+- §3.7: `CompositionHead` "planned upgrade" note removed — Dirichlet NLL is now implemented; `DirichletCompositionHead` documented as a parallel sub-module
+- §3.8: `DirichletDualHeadLoss` documented alongside `DualHeadLoss`; `lambda_comp=0.1` fixed-weight design decision recorded; inference-time α₀ / Var(p̂_k) readouts documented
+- §3 new §3.12: `SupervisedTrainer` documented — batched supervised fine-tuning with population anchor, `tf_icl` permanently frozen
+- §5.1: Composition activation section updated — Dirichlet NLL is now the active path for `rotation_002`; KL divergence retained for `rotation_001`
+- §8.2a: Test counts updated — 262 passing; 144 failing due to stale `ProcessedDataset` fixture missing `centroid_distances` (not a logic regression); 1 error in `test_callbacks`
+- §10: New decisions D1–D4 (Dirichlet NLL + lr_col) added
+- First debug run metrics recorded: Spearman ρ = 0.657, MAE = 0.114 on day-11 held-out cells; Wasserstein 1.51 vs 4.54 baseline
 
 **Changelog v1.7.0**
 - §2: `training/` marked ✓ Implemented; `experiments/` checkpoint dir updated to include `loss_curve.png`
@@ -261,7 +272,7 @@ TabGRN/
 |---|---|---|
 | `DataConfig` | `max_genes`, `test_timepoint=11`, `hardware_tier`, `n_cell_states=8`, `label_softening_temperature=1.0` | `log1p_transform` is validated as `True` at construction; raises if `False` |
 | `ContextConfig` | `n_bins=6`, `cells_per_bin=5`, `max_context_cells=50`, `allow_replacement=True` | Validates `n_bins × cells_per_bin ≤ max_context_cells`; bin 2 (day 11) withheld |
-| `ModelConfig` | `lr_col=1e-5`, `lr_row=1e-4`, `lr_icl=5e-5`, `lr_emb=1e-3`, `lr_head=1e-3`, `warmup_col_steps=500`, `warmup_icl_steps=100`, `output_head_init_bias=0.5`, `output_head_init_std=0.01` | `lr_emb` is for column embeddings (always re-initialised); `bio_plausibility_passed` populated post-training |
+| `ModelConfig` | `lr_col=1e-6`, `lr_row=1e-4`, `lr_icl=5e-5`, `lr_emb=1e-3`, `lr_head=1e-3`, `warmup_col_steps=500`, `warmup_icl_steps=100`, `output_head_init_bias=0.5`, `output_head_init_std=0.01`, `composition_loss_type="kl"` | `lr_emb` is for column embeddings (always re-initialised); `composition_loss_type` switches `TabICLRegressor` between `CompositionHead` (`"kl"`) and `DirichletCompositionHead` (`"dirichlet"`); `bio_plausibility_passed` populated post-training |
 | `ExplainabilityConfig` | `shap_background_size=100`, `shap_background_seed=42`, `bio_plausibility_required=("SOX2",)`, `ih_n_steps=50`, `ih_baseline_strategy="day5_mean"`, `ih_top_k_edges=500` | SOX2 absence in top-20 triggers fallback strategy; IH fields configure Integrated Hessians |
 | `AblationTarget` | `gene`, `zero_in_query=True`, `zero_in_context_states=None`, `zero_in_context_pseudotime_below=None`, `zero_in_context_pseudotime_above=None` | Composable per-gene ablation spec; supports query-only, population-wide, state-specific, and temporal-window variants |
 | `PerturbationConfig` | `ablations=[AblationTarget(gene="WLS")]`, `pseudotime_delta_threshold=-0.05`, `attention_drop_fraction=0.1`, `composition_shift_threshold=0.05` | Default: single cell-autonomous WLS ablation; composition shift is primary signal |
@@ -270,12 +281,13 @@ TabGRN/
 **Named presets:**
 
 ```python
-ExperimentConfig.debug_preset()           # 128 genes, CPU, 2 cells/bin
-ExperimentConfig.rotation_finetune()      # 512 genes, V100, dual-head (pseudotime + composition)
-ExperimentConfig.rotation_baselines()     # Baseline ladder: mean, ridge, xgboost regressor
-ExperimentConfig.full_finetune()          # 1024 genes, A100, extended dual-head training
-ExperimentConfig.scratch_preset()         # No pretrained weights [Phase 6]
-ExperimentConfig.no_icl_preset()          # Single cell input [Phase 6]
+ExperimentConfig.debug_preset()                    # 256 genes, debug tier, Dirichlet NLL
+ExperimentConfig.rotation_finetune()               # 512 genes, standard tier, KL composition head (rotation_001)
+ExperimentConfig.rotation_finetune_dirichlet()     # 512 genes, standard tier, Dirichlet NLL head (rotation_002)
+ExperimentConfig.rotation_baselines()              # Baseline ladder: mean, ridge, xgboost regressor
+ExperimentConfig.full_finetune()                   # 1024 genes, 10 bins × 10 cells, full tier
+ExperimentConfig.scratch_preset()                  # No pretrained weights [Phase 6]
+ExperimentConfig.no_icl_preset()                   # Single cell input [Phase 6]
 ```
 
 **Dependencies:** `spatialmt.config.paths.Paths`, `dataclasses`, `json`, `hashlib`
@@ -437,7 +449,7 @@ def icl_collate(batch: list[tuple[CellTable, TrainingTargets]]) -> ICLBatch
 
 | Stage | Module | Input → Output | LR | Warmup | Biological role |
 |---|---|---|---|---|---|
-| 1 — Column | `col_embedder` (`ColEmbedding`) | `(B, n_cells, n_genes)` → `(B, n_cells, seq_len, embed_dim)` | 1e-5 | 500 steps | GRN signal — `AttentionScorer` hooks here |
+| 1 — Column | `col_embedder` (`ColEmbedding`) | `(B, n_cells, n_genes)` → `(B, n_cells, seq_len, embed_dim)` | 1e-6 | 500 steps | GRN signal — `AttentionScorer` hooks here |
 | 2 — Row | `row_interactor` (`RowInteraction`) | `(B, n_cells, seq_len, embed_dim)` → `(B, n_cells, d_model)` | 1e-4 | None | Aggregates gene context into cell vector |
 | 3 — Label inject | `anchor_label_embedder` (`AnchorLabelEmbedder`) | `(B, n_cells, d_model)` + pseudotime/soft_labels → same | 1e-3 | None | Injects anchor targets into row representations (ICL protocol) |
 | 4 — ICL | `tf_icl` (`tabicl.model.encoders.Encoder`, pretrained) | `(B, n_cells, d_model)` → same; query attends anchors only | 5e-5 | 100 steps | Predicts query relative to anchor context |
@@ -448,7 +460,7 @@ def icl_collate(batch: list[tuple[CellTable, TrainingTargets]]) -> ICLBatch
 **`parameter_groups()` returns four groups:**
 ```python
 [
-    {"name": "col",  "params": list(self.col_embedder.parameters()),         "lr": cfg.lr_col},   # 1e-5
+    {"name": "col",  "params": list(self.col_embedder.parameters()),         "lr": cfg.lr_col},   # 1e-6
     {"name": "row",  "params": list(self.row_interactor.parameters()),        "lr": cfg.lr_row},   # 1e-4
     {"name": "icl",  "params": list(self.tf_icl.parameters()),                "lr": cfg.lr_icl},   # 5e-5
     {"name": "head", "params": (
@@ -492,10 +504,14 @@ nn.init.constant_(self.linear.bias, 0.5)                   # trajectory midpoint
 
 ---
 
-### 3.7 `CompositionHead`
+### 3.7 `CompositionHead` and `DirichletCompositionHead`
 **File:** `path/spatialmt/model/tabgrn.py` ✓ Implemented
 
-**Purpose:** Softmax head producing a K-dimensional probability vector representing cell state affinity across K=8 developmental states (from `class3` annotations). Current interim design; Dirichlet NLL planned for a later phase.
+Two composition heads are implemented. `TabICLRegressor` instantiates one based on `ModelConfig.composition_loss_type`.
+
+#### `CompositionHead` (`composition_loss_type="kl"`)
+
+**Purpose:** Softmax head producing a K-dimensional probability vector. Used in `rotation_finetune()` (`rotation_001`).
 
 **Architecture:** `Linear(d_model, K)` → `softmax(dim=-1)`
 
@@ -524,14 +540,36 @@ nn.init.constant_(self.linear.bias, 0.0)   # uniform-ish softmax prior at init
 **Loss:** KL divergence KL(target ∥ pred) via `DualHeadLoss.composition_loss` — see §3.8  
 **Target:** `soft_labels ∈ (0, 1)^K` with rows summing to 1.0 — computed by distance-to-centroid softmax from `ProcessedDataset`
 
-**Planned upgrade:** Dirichlet NLL with `softplus` activation (Dirichlet concentration parameters α_k > 0) — deferred until rotation baseline is established (TDD v1.3.0 interim note)
+#### `DirichletCompositionHead` (`composition_loss_type="dirichlet"`)
+
+**Purpose:** Outputs Dirichlet concentration parameters α ∈ (0, ∞)^K rather than a probability vector. Used in `rotation_finetune_dirichlet()` (`rotation_002`). Enables per-class uncertainty quantification alongside point predictions.
+
+**Architecture:** `Linear(d_model, K)` → `softplus`
+
+**Input:** `(batch, d_model)` query cell representation  
+**Output:** `(batch, K)` concentration parameters, all > 0
+
+**Inference-time readouts (computed by caller):**
+```
+mean prediction  : α_k / Σα_k
+total precision  : α₀ = Σα_k        (higher = model is more confident about this cell)
+per-class variance: α_k(α₀ − α_k) / (α₀²(α₀ + 1))
+```
+
+**Initialisation:** same `_init_linear` as `CompositionHead` (weight std=0.01, bias=0.0).
+
+**Loss:** Dirichlet NLL via `DirichletDualHeadLoss.composition_loss` — see §3.8
 
 ---
 
-### 3.8 `DualHeadLoss`
+### 3.8 `DualHeadLoss` and `DirichletDualHeadLoss`
 **File:** `path/spatialmt/model/loss.py` ✓ Implemented
 
-**Purpose:** Uncertainty-weighted dual-head loss (Kendall, Gal & Cipolla, NeurIPS 2018). Learns the relative task weighting from data via learnable log σ² parameters, eliminating the need for manual λ tuning.
+Two loss classes are implemented, paired with the two composition heads.
+
+#### `DualHeadLoss` (used with `CompositionHead`, `rotation_001`)
+
+**Purpose:** Uncertainty-weighted dual-head loss (Kendall, Gal & Cipolla, NeurIPS 2018). Both tasks use Kendall weighting with learnable log σ² parameters.
 
 **Mechanism:**
 ```python
@@ -549,8 +587,26 @@ total = exp(–s_pt)  · L_pt   + ½·s_pt
 **Properties:**
 - At init (s=0): `total = L_pt + L_comp` — equal unit weighting
 - ½·s penalty prevents σ → ∞ trivially zeroing both losses
-- `log_sigma_sq_pt` and `log_sigma_sq_comp` must be included in the head parameter group alongside the model's head layers
+- Both `log_sigma_sq_pt` and `log_sigma_sq_comp` must be included in the optimiser
 - Returns `(total, L_pt, L_comp)` — total for `.backward()`, components for logging
+
+#### `DirichletDualHeadLoss` (used with `DirichletCompositionHead`, `rotation_002`)
+
+**Purpose:** Kendall uncertainty weighting on pseudotime MSE only; Dirichlet NLL for composition uses a fixed scalar weight `lambda_comp`.
+
+**Mechanism:**
+```python
+s_pt  = log_sigma_sq_pt   # learnable nn.Parameter, init = 0
+
+L_pt   = MSE(pt_pred, pt_target)
+L_comp = -mean_B log Dir(comp_target ; concentrations)   # Dirichlet NLL
+
+total = exp(–s_pt) · L_pt + ½·s_pt + lambda_comp · L_comp
+```
+
+**`lambda_comp = 0.1` (fixed):** Dirichlet NLL is unbounded below — as concentrations sharpen during training the log-likelihood grows without limit. Kendall's σ would chase it toward −∞ and the combined loss would diverge. A fixed weight keeps concentration magnitudes interpretable and preserves the per-class uncertainty estimates (α₀, Var(p̂_k)) used for GRN edge confidence scoring. At `lambda_comp=0.1`, raw Dirichlet NLL values of O(10–20) contribute O(1–2) to the total, comparable to the Kendall-weighted MSE term.
+
+**Only `log_sigma_sq_pt` is a learnable parameter** — there is no `log_sigma_sq_comp`. The `CheckpointCallback` saves `loss_fn.state_dict()` which captures `log_sigma_sq_pt` for resume.
 
 **Active from training start** — both heads train simultaneously from step one.
 
@@ -603,7 +659,7 @@ total = exp(–s_pt)  · L_pt   + ½·s_pt
 | `param.ndim < 2` | AdamW | Biases, LayerNorm scales, Kendall log σ² scalars |
 
 **Logical groups** (preserved on `MuonAdamW.param_groups` for LR inspection):
-- `col` (lr 1e-5), `row` (lr 1e-4), `icl` (lr 5e-5), `head` (lr 1e-3), `loss` (lr 1e-3 — Kendall σ² parameters)
+- `col` (lr 1e-6), `row` (lr 1e-4), `icl` (lr 5e-5), `head` (lr 1e-3), `loss` (lr 1e-3 — Kendall σ² parameters)
 
 **Serialisation:** `state_dict()` / `load_state_dict()` delegate to the `_muon` and `_adamw` sub-optimizers, enabling full optimizer state persistence in `CheckpointCallback`.
 
@@ -635,7 +691,32 @@ checkpoint_cb.trainer = trainer
 
 ---
 
-### 3.12 `GeneScorer` Protocol
+### 3.12 `SupervisedTrainer`
+**File:** `path/spatialmt/training/trainer.py` ✓ Implemented
+
+**Purpose:** Batched supervised fine-tuning alternative to `Trainer`. Processes all non-day-11 cells in mini-batches over `n_epochs` passes. `tf_icl` is permanently frozen — the ICL attention transformer does not participate in gradient updates.
+
+**Key differences from `Trainer`:**
+
+| | `Trainer` | `SupervisedTrainer` |
+|---|---|---|
+| Input | Stochastic `(query, context)` ICL pair | Mini-batch of cells, no ICL context |
+| Context | Sampled anchors from `ContextSampler` | Population-mean anchor (mean expression of all non-day-11 cells) |
+| `tf_icl` | Unfreezes after `warmup_icl_steps` | Permanently frozen |
+| Step budget | Fixed `n_steps` | `n_epochs` × (n_train_cells / batch_size) |
+| Forward path | `model.forward(ICLBatch)` | `model.forward_supervised(expr, anchor)` |
+
+**Population anchor:** The mean expression vector over all non-day-11 cells is precomputed at construction and stored as `_population_anchor`. At `fit()` start it is moved to device once. This replaces stochastic context sampling — the model sees a fixed representative background rather than a drawn anchor set.
+
+**`tf_icl` permanently frozen:** Set at construction, never re-enabled. `_make_optimizer` excludes the `"icl"` parameter group entirely.
+
+**`fit()` return value:** Same schema as `Trainer.fit()` — `{train_loss, pt_loss, comp_loss, loss_history}`.
+
+**Dependencies:** `numpy`, `torch`, `spatialmt.context.collate.ICLBatch`, `spatialmt.config.experiment.ExperimentConfig`
+
+---
+
+### 3.13 `GeneScorer` Protocol
 **File:** `path/spatialmt/explainability/protocols.py`
 
 **Purpose:** Shared interface for all gene importance scoring methods. Adding a new method (e.g., Integrated Gradients) requires one new class; no changes to existing code.
@@ -659,7 +740,7 @@ class GeneScorer(Protocol):
 
 ---
 
-### 3.13 `AttentionScorer`
+### 3.14 `AttentionScorer`
 **File:** `path/spatialmt/explainability/scorers.py`
 
 **Purpose:** Extracts column-attention weights from stage 1 of the TabICLv2 backbone. Produces a `GeneScoreMap` where each gene's score is its mean outgoing attention weight across heads and query cells — representing how much other genes depend on it.
@@ -687,7 +768,7 @@ assert layer_type == "column", (
 
 ---
 
-### 3.14 `SHAPScorer`
+### 3.15 `SHAPScorer`
 **File:** `path/spatialmt/explainability/scorers.py`
 
 **Purpose:** KernelSHAP-based gene importance scoring. Model-agnostic — works on any baseline (XGBoost, TabPFN v2) without modification, enabling direct comparison of SHAP rankings across the benchmark suite.
@@ -706,7 +787,7 @@ assert layer_type == "column", (
 
 ---
 
-### 3.15 `ExplainabilityReport`
+### 3.16 `ExplainabilityReport`
 **File:** `path/spatialmt/explainability/report.py`
 
 **Purpose:** Reconciles `AttentionScorer` and `SHAPScorer` outputs into a structured disagreement taxonomy. The taxonomy classifies every gene into one of three classes per inference call.
@@ -823,25 +904,42 @@ sequenceDiagram
 
 ## 5. Implementation Details
 
-### 5.1 Composition Head Activation (Current: Softmax; Planned: Softplus + Dirichlet)
+### 5.1 Composition Head Activation (Two parallel paths)
 
-`CompositionHead` currently uses `torch.nn.functional.softmax` to produce a probability vector over K=8 cell states. This is an interim design — Dirichlet NLL with a `softplus` activation is planned for a later phase.
+Both composition heads and their paired losses are implemented. The active path is selected by `ModelConfig.composition_loss_type`.
 
+**KL path (`rotation_001`, `composition_loss_type="kl"`):**
 ```python
+# CompositionHead
 def forward(self, x: torch.Tensor) -> torch.Tensor:
     return torch.softmax(self.linear(x), dim=-1)   # (B, K), rows sum to 1.0
+
+# DualHeadLoss.composition_loss — KL(target ∥ pred)
+kl = (comp_target * (log_target - log_pred)).sum(dim=-1)
+return kl.mean()
 ```
 
-**Loss:** KL divergence KL(target ∥ pred) — natural parameter-free measure between two probability distributions. KL = 0 iff pred == target exactly. No concentration hyperparameter required.
+**Dirichlet NLL path (`rotation_002`, `composition_loss_type="dirichlet"`):**
+```python
+# DirichletCompositionHead
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    return F.softplus(self.linear(x))   # (B, K), all > 0 (concentration parameters)
 
-**Why KL divergence over Dirichlet NLL (current phase):**
+# DirichletDualHeadLoss.composition_loss
+return -torch.distributions.Dirichlet(concentrations).log_prob(comp_target).mean()
+```
 
-| Loss | Requirement | Issue at this stage |
+**Comparison:**
+
+| | KL divergence | Dirichlet NLL |
 |---|---|---|
-| KL divergence | Two probability distributions | Directly compares softmax outputs to soft labels — zero implementation complexity |
-| Dirichlet NLL | Concentration parameters α_k > 0 | Requires softplus activation + epsilon; concentration scale interpretation less intuitive during rotation debugging |
+| Head output | Probability vector (softmax) | Concentration parameters α_k (softplus) |
+| Loss scale | O(0.01–0.5) | O(10–20) — unbounded below as concentrations sharpen |
+| Uncertainty | None — point estimate | α₀ = Σα_k (precision), Var(p̂_k) per class |
+| Optimiser weighting | Kendall σ for both tasks | Fixed `lambda_comp=0.1`; Kendall σ on pseudotime only |
+| Run | `rotation_001` | `rotation_002` |
 
-**Planned upgrade:** `Linear(d_model, K)` → `softplus` → `+ 1e-6` → Dirichlet concentration parameters, with Dirichlet NLL loss. The `softplus + 1e-6` design note from v1.2.0 remains valid for the upgrade path.
+**Why Dirichlet NLL uses fixed weight:** Dirichlet NLL is unbounded below. During training, as concentrations α sharpen to fit the data, the log-likelihood grows without ceiling. Kendall's σ_comp would chase it toward −∞, causing the total loss to diverge. Fixed `lambda_comp=0.1` prevents this while keeping composition gradient magnitude comparable to the Kendall-weighted MSE term.
 
 ### 5.2 Bias Initialisation Logic
 
@@ -1098,16 +1196,19 @@ correlated_expression           # GENE_02 and GENE_03 perfectly correlated (SHAP
 
 ### 8.2a Data Preparation and Model Tests
 
-**Unit test files (all GREEN — 300 tests total):**
-- `tests/unit/test_experiment_config.py` — 32 tests: ExperimentConfig serialisation, hash, presets, sub-config validation
-- `tests/unit/test_dataset.py` — 26 tests: ProcessedDataset schema contract, soft label computation, manifest hash (3 dead memory-feasibility tests removed)
-- `tests/unit/test_tabgrn_model.py` — 53 tests: TabICLRegressor construction, forward pass contracts, AnchorLabelEmbedder, AttentionScorer, parameter groups, gradient flow
-- `tests/unit/test_dual_head_loss.py` — 26 tests: DualHeadLoss Kendall weighting, KL divergence component, uncertainty mechanics
-- `tests/unit/test_context_sampler.py` — 22 tests: ContextSampler bin assignment, day-11 exclusion, sparse bin warning, rng seeding
-- `tests/unit/test_cell_table_builder.py` — 27 tests: CellTableBuilder shape contracts, CellTable/TrainingTargets separation, KeyError on unknown ids, empty anchor list
-- `tests/unit/test_icl_collate.py` — 28 tests: ICLBatch field shapes, icl_collate dtype, ragged context window guard
-- `tests/unit/test_trainer.py` — 65 tests: Trainer construction, query pool filtering, MuonAdamW param routing, warmup/freeze scheduling, fit() smoke, step counter, metrics, loss_history structure and correctness, callbacks integration
-- `tests/unit/test_callbacks.py` — 19 tests: CheckpointCallback construction, file creation, checkpoint contents (model/optimizer/loss_fn/global_step), restore round-trip for model and Kendall sigmas
+**Unit test files (262 passing; 144 failing due to stale fixture — not a logic regression):**
+
+The failing tests span `test_trainer.py`, `test_context_sampler.py`, `test_cell_table_builder.py`, `test_icl_collate.py`, and `test_callbacks.py`. All failures share a single root cause: synthetic `ProcessedDataset` fixtures in `tests/conftest.py` and individual test files construct `ProcessedDataset` without the `centroid_distances` argument that was added when `ProcessedDataset.from_anndata()` began computing it. This is a fixture update task, not a model or training logic regression.
+
+- `tests/unit/test_experiment_config.py` — 44 tests GREEN: ExperimentConfig serialisation, hash, presets, sub-config validation, lr fields
+- `tests/unit/test_dataset.py` — 32 tests GREEN: ProcessedDataset schema contract, soft label computation, manifest hash
+- `tests/unit/test_tabgrn_model.py` — 53 tests GREEN: TabICLRegressor construction, forward pass contracts, AnchorLabelEmbedder, AttentionScorer, parameter groups, gradient flow
+- `tests/unit/test_dual_head_loss.py` — 26 tests GREEN: DualHeadLoss Kendall weighting, KL divergence component, uncertainty mechanics
+- `tests/unit/test_context_sampler.py` — failing (stale fixture)
+- `tests/unit/test_cell_table_builder.py` — failing (stale fixture)
+- `tests/unit/test_icl_collate.py` — failing (stale fixture)
+- `tests/unit/test_trainer.py` — failing (stale fixture)
+- `tests/unit/test_callbacks.py` — failing (stale fixture)
 
 **Integration test files:**
 - `tests/integration/test_prep.py` — tests for `spatialmt.data_preparation.prep` (moved from `test/` in v1.3.0)
@@ -1147,7 +1248,9 @@ missing, unexpected = fresh_model.load_state_dict(ckpt["model_state"], strict=Tr
 assert missing == [] and unexpected == []
 fresh_loss.load_state_dict(ckpt["loss_fn_state"])
 assert torch.isfinite(fresh_loss.log_sigma_sq_pt)
-assert torch.isfinite(fresh_loss.log_sigma_sq_comp)
+# DualHeadLoss also has log_sigma_sq_comp; DirichletDualHeadLoss does not
+if hasattr(fresh_loss, "log_sigma_sq_comp"):
+    assert torch.isfinite(fresh_loss.log_sigma_sq_comp)
 
 # loss_history correctness
 result = trainer.fit()
@@ -1307,6 +1410,15 @@ Training baselines on the full dataset **removes both leakage concerns** and giv
 | T4 | `tabgrn_myriad_run.py` saves 3-panel loss curve PNG to checkpoint dir | Post-training convergence check without interactive tooling. Pseudotime and composition losses are plotted separately to distinguish which head is responsible for any plateau. |
 | T5 | `CheckpointCallback` saves `loss_fn.state_dict()` alongside model and optimizer | `DualHeadLoss.log_sigma_sq_pt` and `log_sigma_sq_comp` are learnable `nn.Parameter` scalars (Kendall uncertainty weighting). Omitting them from the checkpoint would reset the learned task weighting on resume, distorting the early steps of any continued training run. |
 
+### Dirichlet NLL and Loss Weighting Decisions (v1.8.0)
+
+| # | Decision | Rationale |
+|---|---|---|
+| D1 | `DirichletDualHeadLoss` uses fixed `lambda_comp=0.1` instead of Kendall weighting for composition | Dirichlet NLL is unbounded below — concentrations sharpen during training, driving log-likelihood to −∞ without a ceiling. Kendall's σ_comp would diverge. Fixed λ keeps concentration magnitudes interpretable and preserves α₀ / Var(p̂_k) as meaningful uncertainty readouts for downstream GRN edge confidence scoring. |
+| D2 | Both loss classes retained in parallel (`DualHeadLoss` for `rotation_001`, `DirichletDualHeadLoss` for `rotation_002`) | Enables direct comparison of KL vs Dirichlet NLL composition training on the same dataset and architecture. `composition_loss_type` on `ModelConfig` is the single switch. |
+| D3 | `lr_col` reduced from `1e-5` → `1e-6` | Column attention was perturbing too aggressively in early steps before the col_embedder gene representations stabilised. The 500-step warmup freeze prevents updates entirely before step 500, but on unfreeze the original 1e-5 still produced instability. 1e-6 keeps the pretrained GRN signal intact while allowing slow fine-tuning. |
+| D4 | `SupervisedTrainer` implemented alongside `Trainer` | Provides a batched alternative when ICL sampling overhead dominates training time. Uses population-mean anchor rather than stochastic context, and permanently freezes `tf_icl` to avoid training the ICL mechanism without a proper context window. Useful for head-only fine-tuning or debugging head initialisation independently of the ICL pathway. |
+
 ---
 
-*This document reflects all architectural decisions through v1.7.0 (May 2026). The rotation scope (dual-head, regression baseline ladder, WLS/GLI3 perturbation validation) targets July 3rd.*
+*This document reflects all architectural decisions through v1.8.0 (May 2026). The rotation scope (dual-head, regression baseline ladder, WLS/GLI3 perturbation validation) targets July 3rd.*

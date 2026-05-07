@@ -133,7 +133,7 @@ def test_model_config_has_six_lr_fields():
     # Six groups from TDD §3.5: column_attention, row_attention, icl_attention,
     # column_embeddings, pseudotime_head, composition_head
     # Represented by: lr_col, lr_row, lr_icl, lr_emb, lr_head (heads share lr_head)
-    assert cfg.model.lr_col == pytest.approx(1e-5)
+    assert cfg.model.lr_col == pytest.approx(1e-6)
     assert cfg.model.lr_row == pytest.approx(1e-4)
     assert cfg.model.lr_icl == pytest.approx(5e-5)
     assert cfg.model.lr_emb == pytest.approx(1e-3)
