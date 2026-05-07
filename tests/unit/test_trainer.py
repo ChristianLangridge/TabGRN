@@ -69,6 +69,9 @@ def _make_dataset(n_cells: int = N_CELLS, n_genes: int = N_GENES, k: int = K) ->
     soft_labels = (raw / raw.sum(axis=1, keepdims=True)).astype(np.float32)
     manifest_hash = ProcessedDataset._compute_manifest_hash([f"GENE_{i:02d}" for i in range(n_genes)])
     cell_type_labels = pd.Series([f"state_{i % k}" for i in range(n_cells)])
+    cd = rng.random((k, k)).astype(np.float32)
+    cd = (cd + cd.T) / 2
+    np.fill_diagonal(cd, 0.0)
     return ProcessedDataset(
         expression=expression,
         gene_names=[f"GENE_{i:02d}" for i in range(n_genes)],
@@ -80,6 +83,7 @@ def _make_dataset(n_cells: int = N_CELLS, n_genes: int = N_GENES, k: int = K) ->
         soft_labels=soft_labels,
         cell_type_categories=sorted(cell_type_labels.unique()),
         manifest_hash=manifest_hash,
+        centroid_distances=cd,
     )
 
 
@@ -289,7 +293,7 @@ class TestOptimizer:
     def test_col_group_lr(self):
         opt = _make_trainer()._make_optimizer()
         g = next(g for g in opt.param_groups if g.get("name") == "col")
-        assert g["lr"] == pytest.approx(1e-5)
+        assert g["lr"] == pytest.approx(1e-6)
 
     def test_row_group_lr(self):
         opt = _make_trainer()._make_optimizer()

@@ -34,6 +34,9 @@ def _make_dataset() -> ProcessedDataset:
     raw = rng.random((N_CELLS, K)).astype(np.float32)
     soft_labels = (raw / raw.sum(axis=1, keepdims=True)).astype(np.float32)
     cell_type_labels = pd.Series([f"state_{i % K}" for i in range(N_CELLS)])
+    cd = rng.random((K, K)).astype(np.float32)
+    cd = (cd + cd.T) / 2
+    np.fill_diagonal(cd, 0.0)
     return ProcessedDataset(
         expression=expression,
         gene_names=[f"GENE_{i:02d}" for i in range(N_GENES)],
@@ -47,6 +50,7 @@ def _make_dataset() -> ProcessedDataset:
         manifest_hash=ProcessedDataset._compute_manifest_hash(
             [f"GENE_{i:02d}" for i in range(N_GENES)]
         ),
+        centroid_distances=cd,
     )
 
 

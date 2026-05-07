@@ -69,6 +69,9 @@ def _make_dataset(
     soft_labels = (raw / raw.sum(axis=1, keepdims=True)).astype(np.float32)
     manifest_hash = ProcessedDataset._compute_manifest_hash(gene_names)
     categories = sorted(cell_type_labels.unique())
+    cd = rng.random((k, k)).astype(np.float32)
+    cd = (cd + cd.T) / 2
+    np.fill_diagonal(cd, 0.0)
 
     return ProcessedDataset(
         expression=expression,
@@ -81,6 +84,7 @@ def _make_dataset(
         soft_labels=soft_labels,
         cell_type_categories=categories,
         manifest_hash=manifest_hash,
+        centroid_distances=cd,
     )
 
 
@@ -307,6 +311,9 @@ def _make_sparse_dataset(sparse_day: int = 5, n_sparse: int = 2, seed: int = 0) 
     soft_labels = (raw / raw.sum(axis=1, keepdims=True)).astype(np.float32)
     manifest_hash = ProcessedDataset._compute_manifest_hash(gene_names)
     categories = sorted(cell_type_labels.unique())
+    cd = rng.random((k, k)).astype(np.float32)
+    cd = (cd + cd.T) / 2
+    np.fill_diagonal(cd, 0.0)
 
     return ProcessedDataset(
         expression=expression,
@@ -319,6 +326,7 @@ def _make_sparse_dataset(sparse_day: int = 5, n_sparse: int = 2, seed: int = 0) 
         soft_labels=soft_labels,
         cell_type_categories=categories,
         manifest_hash=manifest_hash,
+        centroid_distances=cd,
     )
 
 
