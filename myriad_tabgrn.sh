@@ -1,6 +1,7 @@
-#!/bin/bash -l]
+#!/bin/bash -l
 # Batch script to run a GPU job for model fine-tuning.
 #$ -N tabgrn_rotation           # job name
+
 #$ -l h_rt=08:00:00             # max wall-clock time
 #$ -l mem=6G                    # RAM per core (Myriad: per-core, not total)
 #$ -l gpu=1                     # one GPU
@@ -10,7 +11,7 @@
 #$ -o logs/tabgrn_$JOB_ID.out
 #$ -e logs/tabgrn_$JOB_ID.err
 #$ -m bea                       # email on Begin, End, Abort (add your address below)
-#$ -M <YOUR_UCL_EMAIL>          # ← replace with your UCL email
+#$ -M zcbtcl9@ucl.ac.uk
 
 # ---------------------------------------------------------------------------
 # Paths — adjust if cloned elsewhere on Myriad scratch
@@ -36,7 +37,15 @@ module purge
 module load python/miniconda3/4.10.3   # check available: module avail python
 source activate tabgrn                  # your conda env name on Myriad
 
-pip install -e "$PROJECT_ROOT" --quiet
+# ---------------------------------------------------------------------------
+# Stage h5ad to local scratch (faster random access than Lustre home)
+# ---------------------------------------------------------------------------
+
+echo "Copying h5ad to local scratch..."
+cp "$H5AD_PATH" "$TMPDIR/neurectoderm_with_pseudotime.h5ad" \
+    || { echo "ERROR: failed to copy h5ad to scratch"; exit 1; }
+export H5AD_PATH="$TMPDIR/neurectoderm_with_pseudotime.h5ad"
+echo "  staged: $H5AD_PATH  ($(du -sh "$H5AD_PATH" | cut -f1))"
 
 # ---------------------------------------------------------------------------
 # Pre-flight checks

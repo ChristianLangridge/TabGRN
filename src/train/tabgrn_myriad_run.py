@@ -201,18 +201,12 @@ def _inference_check(
             med = float(np.median(dataset.pseudotime[mask]))
             print(f"    D{day:>2d} : {med:.4f}  (n={mask.sum()})")
 
-    def _progress(done: int, total: int, prefix: str, width: int = 30) -> None:
-        filled = int(width * done / total)
-        bar = "█" * filled + "░" * (width - filled)
-        print(f"\r  {prefix} [{bar}] {done}/{total}", end="", flush=True)
-        if done == total:
-            print()
-
     n_day11 = len(day11_ids)
     print(f"\n  Running forward pass over {n_day11} day-11 cells ...")
     model.eval()
     pt_preds:   list[float] = []
     comp_preds: list[list[float]] = []
+    log_every = max(1, n_day11 // 10)
 
     with torch.no_grad():
         for i, cid in enumerate(day11_ids):
@@ -227,7 +221,8 @@ def _inference_check(
                 comp_preds.append((alpha / alpha.sum()).cpu().tolist())
             else:
                 comp_preds.append(comp_out[0].cpu().tolist())
-            _progress(i + 1, n_day11, prefix="  forward")
+            if (i + 1) % log_every == 0 or (i + 1) == n_day11:
+                print(f"  forward {i + 1}/{n_day11}")
 
     model.train()
 
@@ -252,7 +247,8 @@ def _inference_check(
             comp_true_arr[i].astype(np.float64),
             cost_m,
         ))
-        _progress(i + 1, len(day11_ids), prefix="  emd    ")
+        if (i + 1) % log_every == 0 or (i + 1) == len(day11_ids):
+            print(f"  emd     {i + 1}/{len(day11_ids)}")
     mean_emd             = float(np.mean(emds))
     baseline             = wasserstein_baseline(dataset.soft_labels, train_mask, cost_m)
     bs_mean, bs_per_class = brier_score(comp_pred_arr, comp_true_arr)
@@ -348,7 +344,7 @@ def main() -> None:
     batch_size      = cfg.model.supervised_batch_size
     steps_per_epoch = int(np.ceil(n_train_cells / batch_size))
     n_steps         = N_EPOCHS * steps_per_epoch
-    eval_every      = steps_per_epoch
+    eval_every      = max(50, steps_per_epoch // 4)
 
     print("=" * 60)
     print("TabGRN Myriad run")
@@ -450,6 +446,7 @@ def main() -> None:
     torch.save(
         {
             "model_state":           model.state_dict(),
+            "loss_fn_state":         loss_fn.state_dict(),
             "run_id":                cfg.run_id,
             "composition_loss_type": m.composition_loss_type,
             "global_step":           trainer.global_step,
@@ -512,13 +509,14 @@ def main() -> None:
     torch.save(
         {
             "model_state":           model.state_dict(),
+            "loss_fn_state":         loss_fn.state_dict(),
             "run_id":                cfg.run_id,
             "composition_loss_type": m.composition_loss_type,
             "global_step":           warmup_trainer.global_step,
         },
         warmup_final_path,
     )
-    print(f"\nWarm-up model saved to {warmup_final_path}")
+    print(f"\nPre-ICL checkpoint saved to {warmup_final_path}")
 
     # Inference check on day-11 held-out cells
     _inference_check(model, dataset, sampler, builder, device, _RUN_PRESET)
