@@ -2,7 +2,7 @@
 tabgrn_debug_run.py — Local debug training run for TabGRN-ICL.
 
 Uses ExperimentConfig.debug_preset() (256 genes, max_context_cells=30).
-Runs 200 gradient steps to verify the pipeline end-to-end before the full
+Runs 1000 gradient steps to verify the pipeline end-to-end before the full
 Myriad run. Prints per-step loss and a summary at the end.
 
 Usage
@@ -14,6 +14,10 @@ Optional env vars:
                   (default: data/training_data/AnnData/neurectoderm_with_pseudotime.h5ad)
     BACKBONE    — path to a TabICLv2 .ckpt to load pretrained weights (optional)
     DEVICE      — "cpu" | "mps" | "cuda"  (auto-detected if not set)
+    COMP_LOSS   — "kl" | "dirichlet"  (default: "dirichlet")
+                  Selects composition head and paired loss function.
+                  "kl"        → CompositionHead (softmax) + DualHeadLoss (Kendall on both heads)
+                  "dirichlet" → DirichletCompositionHead (softplus) + DirichletDualHeadLoss (fixed λ)
 """
 import os
 
@@ -40,7 +44,7 @@ from spatialmt.config.paths import Dirs
 from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
-from spatialmt.model.loss import DirichletDualHeadLoss
+from spatialmt.model.loss import DirichletDualHeadLoss, DualHeadLoss
 from spatialmt.model.tabgrn import TabICLRegressor
 from spatialmt.training.trainer import Trainer
 
@@ -61,6 +65,10 @@ _BACKBONE_OVERRIDE = os.environ.get("BACKBONE", None)
 
 _seed_str = os.environ.get("SEED", str(SEED))
 SEED = int(_seed_str) if _seed_str else None
+
+COMP_LOSS = os.environ.get("COMP_LOSS", "dirichlet").lower()
+if COMP_LOSS not in ("kl", "dirichlet"):
+    raise ValueError(f"COMP_LOSS must be 'kl' or 'dirichlet', got {COMP_LOSS!r}")
 
 
 def _detect_device() -> torch.device:
@@ -91,7 +99,7 @@ class LogCallback:
 
 def main() -> None:
     device = _detect_device()
-    cfg    = ExperimentConfig.debug_preset(run_id="debug_local")
+    cfg    = ExperimentConfig.debug_preset(run_id=f"debug_local_{COMP_LOSS}")
 
     if SEED is not None:
         torch.manual_seed(SEED)
@@ -112,6 +120,7 @@ def main() -> None:
     print(f"  embed_dim   : {cfg.model.embed_dim}  "
           f"d_model: {cfg.model.num_cls * cfg.model.embed_dim}  "
           f"n_heads: {cfg.model.n_heads}")
+    print(f"  comp_loss   : {COMP_LOSS}")
     print("=" * 60)
 
     # 1. Data
@@ -141,7 +150,7 @@ def main() -> None:
         n_layers_col          = m.n_layers_col,
         n_layers_row          = m.n_layers_row,
         n_layers_icl          = m.n_layers_icl,
-        composition_loss_type = "dirichlet",
+        composition_loss_type = COMP_LOSS,
     ).to(device)
 
     if backbone_path:
@@ -151,7 +160,7 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {n_params:,}")
 
-    loss_fn = DirichletDualHeadLoss().to(device)
+    loss_fn = (DirichletDualHeadLoss() if COMP_LOSS == "dirichlet" else DualHeadLoss()).to(device)
 
     # 4. Train
     print(f"\n[4/4] Training for {N_STEPS} steps (eval every {EVAL_EVERY}) ...\n")
