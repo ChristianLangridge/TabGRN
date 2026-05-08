@@ -8,8 +8,8 @@
 #$ -pe smp 8                    # 8 CPU cores (shared-memory parallel env)
 #$ -l tmpfs=20G                 # local scratch on the compute node
 #$ -wd /home/$USER/Scratch/TabGRN
-#$ -o logs/tabgrn_$JOB_ID.out
-#$ -e logs/tabgrn_$JOB_ID.err
+#$ -o /home/zcbtcl9/Scratch/TabGRN/logs/tabgrn_$JOB_ID.out
+#$ -e /home/zcbtcl9/Scratch/TabGRN/logs/tabgrn_$JOB_ID.err
 #$ -m bea                       # email on Begin, End, Abort (add your address below)
 #$ -M zcbtcl9@ucl.ac.uk
 
