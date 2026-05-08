@@ -7,7 +7,7 @@
 #$ -l gpu=1                     # one GPU
 #$ -pe smp 8                    # 8 CPU cores (shared-memory parallel env)
 #$ -l tmpfs=20G                 # local scratch on the compute node
-#$ -wd /home/$USER/TabGRN       # working directory (must exist before submission)
+#$ -wd /home/$USER/Scratch/TabGRN
 #$ -o logs/tabgrn_$JOB_ID.out
 #$ -e logs/tabgrn_$JOB_ID.err
 #$ -m bea                       # email on Begin, End, Abort (add your address below)
@@ -17,9 +17,9 @@
 # Paths — adjust if cloned elsewhere on Myriad scratch
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT="$HOME/TabGRN"
-H5AD_PATH="$HOME/TabGRN/data/training_data/AnnData/neurectoderm_with_pseudotime.h5ad"
-BACKBONE="$HOME/TabGRN/data/TabICLv2_checkpoint/tabicl-regressor-v2-20260212.ckpt"
+PROJECT_ROOT="$HOME/Scratch/TabGRN"
+H5AD_PATH="$HOME/Scratch/TabGRN/data/training_data/AnnData/neurectoderm_with_pseudotime.h5ad"
+BACKBONE="$HOME/Scratch/TabGRN/data/TabICLv2_checkpoint/tabicl-regressor-v2-20260212.ckpt"
 
 export PROJECT_ROOT H5AD_PATH BACKBONE
 
