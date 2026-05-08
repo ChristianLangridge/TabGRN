@@ -34,7 +34,8 @@ export SEED=42
 # ---------------------------------------------------------------------------
 
 module purge
-module load python/miniconda3/4.10.3   # check available: module avail python
+module load python/miniconda3/24.3.0-0
+module load cuda/11.8.0/gnu-10.2.0
 source activate tabgrn                  # your conda env name on Myriad
 
 # ---------------------------------------------------------------------------
