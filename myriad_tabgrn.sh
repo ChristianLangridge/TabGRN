@@ -36,7 +36,8 @@ export SEED=42
 module purge
 module load python/miniconda3/24.3.0-0
 module load cuda/11.8.0/gnu-10.2.0
-source activate tabgrn                  # your conda env name on Myriad
+source $UCL_CONDA_PATH/etc/profile.d/conda.sh
+conda activate tabgrn
 
 # ---------------------------------------------------------------------------
 # Stage h5ad to local scratch (faster random access than Lustre home)
