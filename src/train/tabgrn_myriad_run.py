@@ -30,6 +30,7 @@ Optional env vars:
 """
 import math
 import os
+import subprocess
 import time
 
 import matplotlib.pyplot as plt
@@ -53,6 +54,7 @@ from spatialmt.training.trainer import SupervisedTrainer, Trainer
 N_EPOCHS           = int(os.environ.get("N_EPOCHS", "3"))
 N_ICL_WARMUP_STEPS = int(os.environ.get("N_ICL_WARMUP_STEPS", "1000"))
 SEED               = int(os.environ.get("SEED", "42"))
+JOB_ID             = os.environ.get("JOB_ID", "local")
 
 _RUN_PRESET = os.environ.get("RUN_PRESET", "dirichlet").lower()
 if _RUN_PRESET not in {"kl", "dirichlet"}:
@@ -320,6 +322,26 @@ def _save_loss_curve(
 
 
 # ---------------------------------------------------------------------------
+# Checkpoint sync
+# ---------------------------------------------------------------------------
+
+def _git_sync(path, label: str) -> None:
+    """Stage, commit, and push a checkpoint file/directory to the remote."""
+    rel = str(path)
+    cmds = [
+        ["git", "-C", str(PROJECT_ROOT), "add", rel],
+        ["git", "-C", str(PROJECT_ROOT), "commit", "-m", f"[hpc] {label} checkpoint  job={JOB_ID}"],
+        ["git", "-C", str(PROJECT_ROOT), "push"],
+    ]
+    for cmd in cmds:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"  [sync] WARNING: '{' '.join(cmd[2:])}' failed:\n{result.stderr.strip()}")
+            return
+    print(f"  [sync] pushed {label} checkpoint to remote")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -455,6 +477,7 @@ def main() -> None:
         final_path,
     )
     print(f"\nPhase 1 model saved to {final_path}")
+    _git_sync(final_path, "phase1")
 
     # Phase 1.5 — ICL warm-up
     print(f"\n[Phase 1.5] ICL warm-up for {N_ICL_WARMUP_STEPS} steps ...\n")
@@ -518,6 +541,7 @@ def main() -> None:
         warmup_final_path,
     )
     print(f"\nPre-ICL checkpoint saved to {warmup_final_path}")
+    _git_sync(warmup_final_path, "phase1.5")
 
     # Inference check on day-11 held-out cells
     _inference_check(model, dataset, sampler, builder, device, _RUN_PRESET)
@@ -526,6 +550,7 @@ def main() -> None:
     warmup_cfg.save()
     print(f"\nConfig saved to experiments/{cfg.run_id}/config.json")
     print(f"Warmup config saved to experiments/{warmup_cfg.run_id}/config.json")
+    _git_sync(PROJECT_ROOT / "experiments" / cfg.run_id, "final (configs + loss curves)")
 
 
 if __name__ == "__main__":
