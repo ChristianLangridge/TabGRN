@@ -245,7 +245,7 @@ class TabICLRegressor(nn.Module):
         col_embedder is excluded — pretrained position-based weights don't transfer
         to our gene-indexed input space. icl_predictor.tf_icl.* is remapped to tf_icl.*.
         """
-        state = torch.load(checkpoint_path, map_location="cpu")
+        state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         if "state_dict" in state:
             state = state["state_dict"]
 
@@ -258,10 +258,11 @@ class TabICLRegressor(nn.Module):
 
         self.load_state_dict(backbone_state, strict=strict)
 
-    def parameter_groups(self) -> list[dict]:
+    def parameter_groups(self, cfg: "ModelConfig | None" = None) -> list[dict]:
         """Return four optimizer param groups: col, row, icl, head."""
         from spatialmt.config.experiment import ModelConfig
-        cfg = ModelConfig()
+        if cfg is None:
+            cfg = ModelConfig()
         return [
             {
                 "name":   "col",

@@ -40,7 +40,7 @@ class MuonAdamW:
                 adamw_groups.append({"name": name, "params": vector_params, "lr": lr})
 
         self._muon  = Muon(muon_groups)  if muon_groups  else None
-        self._adamw = torch.optim.AdamW(adamw_groups) if adamw_groups else None
+        self._adamw = torch.optim.AdamW(adamw_groups, weight_decay=0.0) if adamw_groups else None
 
     def zero_grad(self, set_to_none: bool = True) -> None:
         if self._muon  is not None:
@@ -121,7 +121,7 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _make_optimizer(self) -> "MuonAdamW":
-        model_groups = self.model.parameter_groups()
+        model_groups = self.model.parameter_groups(self.config.model)
         loss_group = {
             "name": "loss",
             "params": list(self.loss_fn.parameters()),
@@ -255,7 +255,7 @@ class SupervisedTrainer:
         )
 
     def _make_optimizer(self) -> "MuonAdamW":
-        model_groups = [g for g in self.model.parameter_groups() if g["name"] != "icl"]
+        model_groups = [g for g in self.model.parameter_groups(self.config.model) if g["name"] != "icl"]
         loss_group = {
             "name":   "loss",
             "params": list(self.loss_fn.parameters()),

@@ -229,7 +229,8 @@ def _inference_check(
     pt_pred_arr   = np.array(pt_preds,  dtype=np.float32)
     comp_pred_arr = np.array(comp_preds, dtype=np.float32)
 
-    day11_indices  = [dataset.cell_ids.index(cid) for cid in day11_ids]
+    _id_to_idx     = {cid: i for i, cid in enumerate(dataset.cell_ids)}
+    day11_indices  = [_id_to_idx[cid] for cid in day11_ids]
     pt_true_arr    = dataset.pseudotime[day11_indices]
     comp_true_arr  = dataset.soft_labels[day11_indices]
     day11_days_arr = dataset.collection_day[day11_indices]
@@ -522,7 +523,9 @@ def main() -> None:
     _inference_check(model, dataset, sampler, builder, device, _RUN_PRESET)
 
     cfg.save()
+    warmup_cfg.save()
     print(f"\nConfig saved to experiments/{cfg.run_id}/config.json")
+    print(f"Warmup config saved to experiments/{warmup_cfg.run_id}/config.json")
 
 
 if __name__ == "__main__":
