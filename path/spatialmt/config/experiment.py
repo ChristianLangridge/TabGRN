@@ -373,6 +373,8 @@ class ExperimentConfig:
     @classmethod
     def full_finetune(cls, run_id: str = "rotation_001") -> "ExperimentConfig":
         tier = HARDWARE_TIERS["full"]
+        model_cfg = cls._pretrained_model_config()
+        model_cfg.supervised_batch_size = 8  # 1024 genes × 64 batch = 65k col ops → OOM on A100
         return cls(
             run_id=run_id,
             data=DataConfig(
@@ -384,7 +386,7 @@ class ExperimentConfig:
                 cells_per_bin=10,
                 max_context_cells=tier["max_context_cells"],
             ),
-            model=cls._pretrained_model_config(),
+            model=model_cfg,
             explainability=ExplainabilityConfig(),
             perturbation=PerturbationConfig(),
             benchmark=BenchmarkConfig(),
@@ -396,6 +398,7 @@ class ExperimentConfig:
         tier = HARDWARE_TIERS["full"]
         model_cfg = cls._pretrained_model_config()
         model_cfg.composition_loss_type = "dirichlet"
+        model_cfg.supervised_batch_size = 8  # 1024 genes × 64 batch = 65k col ops → OOM on A100
         return cls(
             run_id=run_id,
             data=DataConfig(
