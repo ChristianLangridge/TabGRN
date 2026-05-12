@@ -228,9 +228,9 @@ class TabICLRegressor(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Supervised forward bypassing tf_icl. Returns (pt_pred (B,), comp_pred (B, K))."""
         B      = gene_expression.shape[0]
-        anchor   = population_anchor.unsqueeze(0).unsqueeze(0).expand(B, 16, -1)
+        anchor   = population_anchor.unsqueeze(0).unsqueeze(0).expand(B, 4, -1)
         x        = torch.cat([anchor, gene_expression.unsqueeze(1)], dim=1)
-        dummy_pt = torch.zeros(B, 16, device=gene_expression.device, dtype=gene_expression.dtype)
+        dummy_pt = torch.zeros(B, 4, device=gene_expression.device, dtype=gene_expression.dtype)
         emb = self.col_embedder(x, dummy_pt)
         x   = self.row_interactor(emb.clone())
         x   = x[:, -1, :]
