@@ -29,6 +29,10 @@ export N_EPOCHS=3
 export N_ICL_WARMUP_STEPS=1000
 export SEED=42
 
+# Prevent fragmentation OOM: PyTorch reserves blocks that become non-contiguous;
+# expandable_segments lets CUDA serve large allocations from non-contiguous VA ranges.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
