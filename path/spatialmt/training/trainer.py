@@ -170,14 +170,14 @@ class Trainer:
 
             optimizer.zero_grad()
 
-            pt_pred, comp_pred = self.model(batch)
-
-            total_loss, pt_loss, comp_loss = self.loss_fn(
-                pt_pred,
-                batch.query_pseudotime,
-                comp_pred,
-                batch.query_soft_labels,
-            )
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
+                pt_pred, comp_pred = self.model(batch)
+                total_loss, pt_loss, comp_loss = self.loss_fn(
+                    pt_pred,
+                    batch.query_pseudotime,
+                    comp_pred,
+                    batch.query_soft_labels,
+                )
 
             total_loss.backward()
             optimizer.step()
@@ -302,10 +302,11 @@ class SupervisedTrainer:
                 )
 
                 optimizer.zero_grad()
-                pt_pred, comp_pred = self.model.forward_supervised(expr, anchor)
-                total_loss, pt_loss, comp_loss = self.loss_fn(
-                    pt_pred, pt_target, comp_pred, sl_target,
-                )
+                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
+                    pt_pred, comp_pred = self.model.forward_supervised(expr, anchor)
+                    total_loss, pt_loss, comp_loss = self.loss_fn(
+                        pt_pred, pt_target, comp_pred, sl_target,
+                    )
                 total_loss.backward()
                 optimizer.step()
 

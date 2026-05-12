@@ -28,7 +28,6 @@ export RUN_PRESET=dirichlet
 export N_EPOCHS=3
 export N_ICL_WARMUP_STEPS=1000
 export SEED=42
-export CUDA_LAUNCH_BLOCKING=1
 
 # ---------------------------------------------------------------------------
 # Environment
