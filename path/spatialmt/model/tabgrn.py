@@ -228,12 +228,9 @@ class TabICLRegressor(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Supervised forward bypassing tf_icl. Returns (pt_pred (B,), comp_pred (B, K))."""
         B      = gene_expression.shape[0]
-        # 16 copies: Flash SDPA requires seq-len % 8 == 0 on most GPUs; 2 causes a
-        # CUDA invalid-configuration error. Identical anchors leave semantics unchanged.
-        # 15 anchors + 1 query = 16 total rows; Flash SDPA requires seq-len % 8 == 0.
-        anchor = population_anchor.unsqueeze(0).unsqueeze(0).expand(B, 15, -1)
-        x      = torch.cat([anchor, gene_expression.unsqueeze(1)], dim=1)
-        dummy_pt = torch.zeros(B, 15, device=gene_expression.device, dtype=gene_expression.dtype)
+        anchor   = population_anchor.unsqueeze(0).unsqueeze(0).expand(B, 16, -1)
+        x        = torch.cat([anchor, gene_expression.unsqueeze(1)], dim=1)
+        dummy_pt = torch.zeros(B, 16, device=gene_expression.device, dtype=gene_expression.dtype)
         emb = self.col_embedder(x, dummy_pt)
         x   = self.row_interactor(emb.clone())
         x   = x[:, -1, :]

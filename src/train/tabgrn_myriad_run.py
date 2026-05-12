@@ -37,6 +37,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+torch.backends.cuda.enable_flash_sdp(False)
+
 from spatialmt.config.experiment import ExperimentConfig
 from spatialmt.config.paths import PROJECT_ROOT
 from spatialmt.context.builder import CellTableBuilder
