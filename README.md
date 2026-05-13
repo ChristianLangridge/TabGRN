@@ -21,6 +21,7 @@ TabGRN is a novel PFN-style model, fine-tuned with neuroepithelial brain organoi
 - [Usage](#usage)
 - [Known Issues & Limitations](#known-issues--limitations)
 - [Contributing](#contributing)
+- [Citation](#citation)
 - [License](#license)
 
 ---
@@ -78,6 +79,35 @@ Place all raw data within a 'data/raw/' folder so the path-finding system can re
 
 ## Contributing
 
+This is an active research project. If you'd like to contribute:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/your-feature`)
+3. Commit your changes (`git commit -m 'Add: your feature'`)
+4. Push and open a Pull Request
+5. Add a dated, detailed comment/annotation in the `CHANGELOG.md` file of the change
+
+Please ensure any new scripts avoid hardcoded paths and include basic inline documentation.
+
+---
+
+## Citation
+
+If you use this codebase or the TabGRN architecture in your work, please cite:
+
+```
+Langridge, C. (2025–2026). TabGRN.
+Joint-rotational project, Queen Mary University London, University College London
+and The Alan Turing Institute.
+https://github.com/ChristianLangridge/TabGRN
+```
+
 ---
 
 ## License
+
+This project is licensed under the BSD-3-Clause License. See [LICENSE](LICENSE) for details.
+
+---
+
+*Developed as part of a joint rotational PhD project at Queen Mary University London, University College London and The Alan Turing Institute, under Prof. Julien Gautrot, Prof. Yanlan Mao, Dr. Isabel Palacios and Dr. Federico Nanni.*
