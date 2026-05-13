@@ -2,7 +2,8 @@
 # Batch script to run a GPU job for model fine-tuning.
 #$ -N tabgrn_rotation           # job name
 
-#$ -l h_rt=08:00:00             # max wall-clock time
+#$ -l h_rt=48:00:00             # max wall-clock time
+#$ -l h_cpu=48:00:00            # max CPU time
 #$ -l mem=6G                    # RAM per core (Myriad: per-core, not total)
 #$ -l gpu=1                     # one GPU
 #$ -pe smp 8                    # 8 CPU cores (shared-memory parallel env)
@@ -85,7 +86,7 @@ done
 
 cd "$PROJECT_ROOT"
 
-python src/train/tabgrn_myriad_run.py
+python -u src/train/tabgrn_myriad_run.py
 
 echo "============================================================"
 echo "Job complete: $JOB_ID"

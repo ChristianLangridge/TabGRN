@@ -427,7 +427,7 @@ def main() -> None:
 
     # 3. Phase 1 — supervised fine-tuning
     print(f"\n[3/3] Phase 1: supervised fine-tuning "
-          f"({N_EPOCHS} epochs × {steps_per_epoch} steps/epoch) ...\n")
+          f"({N_EPOCHS} epochs × {steps_per_epoch} steps/epoch) ...  [{time.strftime('%H:%M:%S')}]\n")
 
     ckpt_dir = PROJECT_ROOT / "experiments" / cfg.run_id / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -481,7 +481,7 @@ def main() -> None:
     _git_sync(final_path, "phase1")
 
     # Phase 1.5 — ICL warm-up
-    print(f"\n[Phase 1.5] ICL warm-up for {N_ICL_WARMUP_STEPS} steps ...\n")
+    print(f"\n[Phase 1.5] ICL warm-up for {N_ICL_WARMUP_STEPS} steps ...  [{time.strftime('%H:%M:%S')}]\n")
 
     warmup_cfg = ExperimentConfig.icl_warmup_preset(
         run_id=cfg.run_id + "_warmup",
@@ -545,6 +545,7 @@ def main() -> None:
     _git_sync(warmup_final_path, "phase1.5")
 
     # Inference check on day-11 held-out cells
+    print(f"\n[Phase 2] Inference on day-11 held-out cells ...  [{time.strftime('%H:%M:%S')}]")
     _inference_check(model, dataset, sampler, builder, device, _RUN_PRESET)
 
     cfg.save()
