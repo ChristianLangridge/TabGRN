@@ -1,5 +1,5 @@
 """
-tabgrn_myriad_run.py — Full training run for TabGRN on Myriad HPC (Option B).
+tabgrn_myriad_run.py — Full training run for TabGRN on Myriad HPC.
 
 Training strategy
 -----------------
