@@ -70,6 +70,12 @@ COMP_LOSS = os.environ.get("COMP_LOSS", "dirichlet").lower()
 if COMP_LOSS not in ("kl", "dirichlet"):
     raise ValueError(f"COMP_LOSS must be 'kl' or 'dirichlet', got {COMP_LOSS!r}")
 
+# Ablation flags
+# FREEZE_ICL=1  — keep tf_icl frozen for all N_STEPS (simulates post-Phase-1.5 checkpoint)
+# NULL_CONTEXT=1 — run a second inference pass with zeroed context tensors
+FREEZE_ICL   = os.environ.get("FREEZE_ICL",   "").lower() in ("1", "true")
+NULL_CONTEXT = os.environ.get("NULL_CONTEXT",  "").lower() in ("1", "true")
+
 
 def _detect_device() -> torch.device:
     env = os.environ.get("DEVICE", "").lower()
@@ -121,6 +127,10 @@ def main() -> None:
           f"d_model: {cfg.model.num_cls * cfg.model.embed_dim}  "
           f"n_heads: {cfg.model.n_heads}")
     print(f"  comp_loss   : {COMP_LOSS}")
+    if FREEZE_ICL:
+        print("  freeze_icl  : ON  (tf_icl frozen throughout — ablation mode)")
+    if NULL_CONTEXT:
+        print("  null_context: ON  (second inference pass with zeroed context)")
     print("=" * 60)
 
     # 1. Data
@@ -161,6 +171,9 @@ def main() -> None:
     print(f"  Parameters: {n_params:,}")
 
     loss_fn = (DirichletDualHeadLoss() if COMP_LOSS == "dirichlet" else DualHeadLoss()).to(device)
+
+    if FREEZE_ICL:
+        cfg.model.warmup_icl_steps = N_STEPS + 1  # warmup never completes → tf_icl stays frozen
 
     # 4. Train
     print(f"\n[4/4] Training for {N_STEPS} steps (eval every {EVAL_EVERY}) ...\n")
@@ -233,6 +246,14 @@ def _sanity_checks(
         print(f"  OK    col_embedder frozen ({warmup_remaining} warmup steps remaining)")
     else:
         print("  OK    col_embedder unfrozen (warmup complete)")
+
+    icl_frozen = all(not p.requires_grad for p in model.tf_icl.parameters())
+    if FREEZE_ICL:
+        tag = "OK  " if icl_frozen else "FAIL"
+        print(f"  {tag}  tf_icl frozen throughout (FREEZE_ICL ablation)")
+    else:
+        status = "frozen" if icl_frozen else "unfrozen (warmup complete)"
+        print(f"  OK    tf_icl {status}")
 
     # Heads always trainable
     head_ok = all(p.requires_grad for p in model.pseudotime_head.parameters())
@@ -385,6 +406,53 @@ def _inference_check(
     print(f"  pred composition:\n    {pred_comp_str}")
     anchor_ids_ex, _ = sampler.sample(day11_ids[0])
     print(f"  n context cells : {len(anchor_ids_ex)}")
+
+    # -- Null-context ablation --
+    if NULL_CONTEXT:
+        print("\n  -- Null-context ablation (context zeroed) --")
+        null_pt_preds:   list[float] = []
+        null_comp_preds: list[list[float]] = []
+
+        with torch.no_grad():
+            for i, cid in enumerate(day11_ids):
+                anchor_ids, _ = sampler.sample(cid)
+                table, label  = builder.build(cid, anchor_ids)
+                batch         = icl_collate([(table, label)])
+                batch         = _batch_to_device(batch, device)
+                # Zero all context tensors — expression, pseudotime, soft labels
+                batch.context_expression  = torch.zeros_like(batch.context_expression)
+                batch.context_pseudotime  = torch.zeros_like(batch.context_pseudotime)
+                batch.context_soft_labels = torch.zeros_like(batch.context_soft_labels)
+                pt_out, comp_out = model(batch)
+                null_pt_preds.append(pt_out[0].item())
+                alpha = comp_out[0]
+                null_comp_preds.append((alpha / alpha.sum()).cpu().tolist())
+                _progress(i + 1, n_day11, prefix="  null  ")
+
+        null_pt_arr   = np.array(null_pt_preds,   dtype=np.float32)
+        null_comp_arr = np.array(null_comp_preds,  dtype=np.float32)
+
+        null_rho     = spearman_r(null_pt_arr, pt_true_arr)
+        null_mae     = mae(null_pt_arr, pt_true_arr)
+        null_emds    = [
+            wasserstein_1(
+                null_comp_arr[i].astype(np.float64),
+                comp_true_arr[i].astype(np.float64),
+                cost_m,
+            )
+            for i in range(len(day11_ids))
+        ]
+        null_emd  = float(np.mean(null_emds))
+        null_bs, _  = brier_score(null_comp_arr, comp_true_arr)
+        null_js     = jsd(null_comp_arr, comp_true_arr)
+
+        print(f"  Spearman ρ   : {null_rho:+.4f}   Δ {null_rho - rho:+.4f} vs real context")
+        print(f"  MAE          : {null_mae:.4f}   Δ {null_mae - pt_mae:+.4f}")
+        print(f"  Wasserstein  : {null_emd:.4f}   Δ {null_emd - mean_emd:+.4f}")
+        print(f"  Brier score  : {null_bs:.4f}   Δ {null_bs - bs_mean:+.4f}")
+        print(f"  JSD          : {null_js:.4f}   Δ {null_js - js:+.4f}")
+        print("  (positive Δ = null context is worse, negative = real context was hurting)")
+
     print("=" * 60)
 
 
