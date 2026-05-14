@@ -2,11 +2,11 @@
 # Batch script to run a GPU job for model fine-tuning.
 #$ -N tabgrn_rotation           # job name
 
-#$ -l h_rt=48:00:00             # max wall-clock time
-#$ -l h_cpu=48:00:00            # max CPU time
-#$ -l mem=6G                    # RAM per core (Myriad: per-core, not total)
+#$ -l h_rt=2:00:00              # max wall-clock time
+#$ -l h_cpu=2:00:00             # max CPU time
+#$ -l mem=4G                    # RAM per core (Myriad: per-core, not total)
 #$ -l gpu=1                     # one GPU
-#$ -pe smp 8                    # 8 CPU cores (shared-memory parallel env)
+#$ -pe smp 4                    # 4 CPU cores (shared-memory parallel env)
 #$ -l tmpfs=20G                 # local scratch on the compute node
 #$ -wd /home/$USER/Scratch/TabGRN
 #$ -o /home/zcbtcl9/Scratch/TabGRN/logs/tabgrn_$JOB_ID.out
@@ -21,8 +21,10 @@
 PROJECT_ROOT="$HOME/Scratch/TabGRN"
 H5AD_PATH="$HOME/Scratch/TabGRN/data/training_data/AnnData/neurectoderm_with_pseudotime.h5ad"
 BACKBONE="$HOME/Scratch/TabGRN/data/TabICLv2_checkpoint/tabicl-regressor-v2-20260212.ckpt"
+PHASE1_CHECKPOINT="$HOME/Scratch/TabGRN/experiments/rotation_002/checkpoints/phase1_final.pt"
 
-export PROJECT_ROOT H5AD_PATH BACKBONE
+
+export PROJECT_ROOT H5AD_PATH BACKBONE PHASE1_CHECKPOINT
 
 # Run preset — "dirichlet" uses Dirichlet NLL + fixed lambda_comp
 export RUN_PRESET=dirichlet
@@ -71,9 +73,10 @@ echo "  WARMUP STEPS: $N_ICL_WARMUP_STEPS"
 echo "  PROJECT_ROOT: $PROJECT_ROOT"
 echo "  H5AD_PATH   : $H5AD_PATH"
 echo "  BACKBONE    : $BACKBONE"
+echo "  PHASE1_CKPT : ${PHASE1_CHECKPOINT:-none}"
 echo "============================================================"
 
-for f in "$H5AD_PATH" "$BACKBONE"; do
+for f in "$H5AD_PATH" "$BACKBONE" ${PHASE1_CHECKPOINT:+"$PHASE1_CHECKPOINT"}; do
     if [ ! -f "$f" ]; then
         echo "ERROR: required file not found: $f"
         exit 1

@@ -27,6 +27,7 @@ Optional env vars:
     N_ICL_WARMUP_STEPS  — ICL warm-up steps (default: 1000)
     SEED                — integer RNG seed (default: 42)
     DEVICE              — "cpu" | "cuda"  (auto-detected if not set)
+    PHASE1_CHECKPOINT   — path to a phase1_final.pt to skip Phase 1 entirely
 """
 import math
 import os
@@ -69,6 +70,8 @@ if not H5AD_PATH:
         "H5AD_PATH env var is not set.\n"
         "Add: export H5AD_PATH=/path/to/neurectoderm_with_pseudotime.h5ad"
     )
+
+PHASE1_CHECKPOINT = os.environ.get("PHASE1_CHECKPOINT")
 
 BACKBONE_PATH = os.environ.get("BACKBONE")
 if not BACKBONE_PATH:
@@ -426,59 +429,65 @@ def main() -> None:
     ).to(device)
 
     # 3. Phase 1 — supervised fine-tuning
-    print(f"\n[3/3] Phase 1: supervised fine-tuning "
-          f"({N_EPOCHS} epochs × {steps_per_epoch} steps/epoch) ...  [{time.strftime('%H:%M:%S')}]\n")
-
     ckpt_dir = PROJECT_ROOT / "experiments" / cfg.run_id / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    checkpoint_cb = CheckpointCallback(
-        trainer = None,
-        loss_fn = loss_fn,
-        out_dir = ckpt_dir,
-        every   = eval_every,
-    )
-    trainer = SupervisedTrainer(
-        model      = model,
-        dataset    = dataset,
-        loss_fn    = loss_fn,
-        config     = cfg,
-        n_epochs   = N_EPOCHS,
-        eval_every = eval_every,
-        callbacks  = [ProgressCallback(n_steps, "Phase 1"), checkpoint_cb],
-        seed       = SEED,
-    )
-    checkpoint_cb.trainer = trainer
+    if PHASE1_CHECKPOINT:
+        print(f"\n[3/3] Phase 1: skipped — loading {PHASE1_CHECKPOINT}  [{time.strftime('%H:%M:%S')}]")
+        _p1 = torch.load(PHASE1_CHECKPOINT, map_location=device)
+        model.load_state_dict(_p1["model_state"])
+        loss_fn.load_state_dict(_p1["loss_fn_state"])
+    else:
+        print(f"\n[3/3] Phase 1: supervised fine-tuning "
+              f"({N_EPOCHS} epochs × {steps_per_epoch} steps/epoch) ...  [{time.strftime('%H:%M:%S')}]\n")
 
-    t0 = time.time()
-    metrics = trainer.fit()
-    elapsed_p1 = time.time() - t0
+        checkpoint_cb = CheckpointCallback(
+            trainer = None,
+            loss_fn = loss_fn,
+            out_dir = ckpt_dir,
+            every   = eval_every,
+        )
+        trainer = SupervisedTrainer(
+            model      = model,
+            dataset    = dataset,
+            loss_fn    = loss_fn,
+            config     = cfg,
+            n_epochs   = N_EPOCHS,
+            eval_every = eval_every,
+            callbacks  = [ProgressCallback(n_steps, "Phase 1"), checkpoint_cb],
+            seed       = SEED,
+        )
+        checkpoint_cb.trainer = trainer
 
-    print("\n" + "=" * 60)
-    print("Phase 1 complete")
-    print(f"  elapsed     : {elapsed_p1:.1f}s  ({elapsed_p1 / n_steps:.3f}s/step)")
-    print(f"  train_loss  : {metrics['train_loss']:.4f}")
-    print(f"  pt_loss     : {metrics['pt_loss']:.4f}")
-    print(f"  comp_loss   : {metrics['comp_loss']:.4f}")
-    print("=" * 60)
+        t0 = time.time()
+        metrics = trainer.fit()
+        elapsed_p1 = time.time() - t0
 
-    _sanity_checks(metrics, loss_fn, model, trainer.global_step,
-                   cfg.model.warmup_col_steps, "Phase 1")
-    _save_loss_curve(metrics["loss_history"], ckpt_dir, cfg.run_id, comp_label, "phase1")
+        print("\n" + "=" * 60)
+        print("Phase 1 complete")
+        print(f"  elapsed     : {elapsed_p1:.1f}s  ({elapsed_p1 / n_steps:.3f}s/step)")
+        print(f"  train_loss  : {metrics['train_loss']:.4f}")
+        print(f"  pt_loss     : {metrics['pt_loss']:.4f}")
+        print(f"  comp_loss   : {metrics['comp_loss']:.4f}")
+        print("=" * 60)
 
-    final_path = ckpt_dir / "phase1_final.pt"
-    torch.save(
-        {
-            "model_state":           model.state_dict(),
-            "loss_fn_state":         loss_fn.state_dict(),
-            "run_id":                cfg.run_id,
-            "composition_loss_type": m.composition_loss_type,
-            "global_step":           trainer.global_step,
-        },
-        final_path,
-    )
-    print(f"\nPhase 1 model saved to {final_path}")
-    _git_sync(final_path, "phase1")
+        _sanity_checks(metrics, loss_fn, model, trainer.global_step,
+                       cfg.model.warmup_col_steps, "Phase 1")
+        _save_loss_curve(metrics["loss_history"], ckpt_dir, cfg.run_id, comp_label, "phase1")
+
+        final_path = ckpt_dir / "phase1_final.pt"
+        torch.save(
+            {
+                "model_state":           model.state_dict(),
+                "loss_fn_state":         loss_fn.state_dict(),
+                "run_id":                cfg.run_id,
+                "composition_loss_type": m.composition_loss_type,
+                "global_step":           trainer.global_step,
+            },
+            final_path,
+        )
+        print(f"\nPhase 1 model saved to {final_path}")
+        _git_sync(final_path, "phase1")
 
     # Phase 1.5 — ICL warm-up
     print(f"\n[Phase 1.5] ICL warm-up for {N_ICL_WARMUP_STEPS} steps ...  [{time.strftime('%H:%M:%S')}]\n")
