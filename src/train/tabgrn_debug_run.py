@@ -398,18 +398,41 @@ def _inference_check(
     # --- Stratified composition metrics by dominant true class ---
     dominant_class = comp_true_arr.argmax(axis=1)  # (n_day11,) — index into cats
     print("\n  -- Composition head: stratified by dominant true class --")
-    print(f"  {'class':<40} {'n':>5}  {'W-dist':>7}  {'JSD':>7}  {'Brier':>7}")
+    print(f"  {'class':<40} {'n':>5}  {'W-dist':>7}  {'JSD':>7}  {'Brier':>7}  {'pt_med':>7}")
+    worse_than_baseline: list[tuple[str, np.ndarray]] = []  # (name, stratum_mask)
     for cls_idx, cls_name in enumerate(cats):
         mask = dominant_class == cls_idx
         if not mask.any():
             continue
-        cls_emds = [emds[i] for i, m in enumerate(mask) if m]
+        cls_emds  = [emds[i] for i, m in enumerate(mask) if m]
         cls_bs, _ = brier_score(comp_pred_arr[mask], comp_true_arr[mask])
         cls_js    = jsd(comp_pred_arr[mask], comp_true_arr[mask])
+        cls_w     = float(np.mean(cls_emds))
+        cls_pt    = float(np.median(pt_true_arr[mask]))
+        flag      = "  *** below baseline" if cls_w >= baseline else ""
         print(
             f"  {cls_name:<40} {mask.sum():>5d}  "
-            f"{np.mean(cls_emds):>7.4f}  {cls_js:>7.4f}  {cls_bs:>7.4f}"
+            f"{cls_w:>7.4f}  {cls_js:>7.4f}  {cls_bs:>7.4f}  {cls_pt:>7.4f}"
+            f"{flag}"
         )
+        if cls_w >= baseline:
+            worse_than_baseline.append((cls_name, mask))
+
+    # For any stratum worse than the null baseline, print mean true vs pred composition
+    # so we can see what the model is collapsing to.
+    for cls_name, mask in worse_than_baseline:
+        mean_true = comp_true_arr[mask].mean(axis=0)
+        mean_pred = comp_pred_arr[mask].mean(axis=0)
+        mean_pt_true = float(pt_true_arr[mask].mean())
+        mean_pt_pred = float(pt_pred_arr[mask].mean())
+        print(f"\n  -- Failure analysis: '{cls_name}' (W-dist ≥ baseline) --")
+        print(f"  pseudotime  true mean {mean_pt_true:.4f}  pred mean {mean_pt_pred:.4f}")
+        col_w = 36
+        print(f"  {'class':<{col_w}}  {'true_mean':>9}  {'pred_mean':>9}  {'delta':>9}")
+        for i, cat in enumerate(cats):
+            delta = mean_pred[i] - mean_true[i]
+            flag = "  <-- overfit" if delta > 0.05 else ("  <-- underfit" if delta < -0.05 else "")
+            print(f"  {cat:<{col_w}}  {mean_true[i]:>9.4f}  {mean_pred[i]:>9.4f}  {delta:>+9.4f}{flag}")
 
     # Qualitative example — first day-11 cell
     print("\n  -- Example: first day-11 cell --")
