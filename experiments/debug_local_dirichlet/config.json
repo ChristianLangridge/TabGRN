@@ -29,7 +29,7 @@
     "lr_emb": 0.001,
     "lr_head": 0.001,
     "warmup_col_steps": 500,
-    "warmup_icl_steps": 100,
+    "warmup_icl_steps": 1001,
     "output_head_init_bias": 0.5,
     "output_head_init_std": 0.01,
     "bio_plausibility_passed": null,

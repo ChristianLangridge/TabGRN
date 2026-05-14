@@ -206,7 +206,7 @@ class DirichletDualHeadLoss(nn.Module):
         concentrations : (B, K)  strictly positive — DirichletCompositionHead output
         comp_target    : (B, K)  soft labels summing to 1 per row
         """
-        return -torch.distributions.Dirichlet(concentrations).log_prob(comp_target).mean()
+        return -torch.distributions.Dirichlet(concentrations.clamp(min=1e-6)).log_prob(comp_target).mean()
 
     def forward(
         self,
