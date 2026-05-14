@@ -395,6 +395,22 @@ def _inference_check(
     print(f"  Brier/class  : {bs_str}")
     print(f"  JSD          : {js:.4f}   (error, bounded [0,1])")
 
+    # --- Stratified composition metrics by dominant true class ---
+    dominant_class = comp_true_arr.argmax(axis=1)  # (n_day11,) — index into cats
+    print("\n  -- Composition head: stratified by dominant true class --")
+    print(f"  {'class':<40} {'n':>5}  {'W-dist':>7}  {'JSD':>7}  {'Brier':>7}")
+    for cls_idx, cls_name in enumerate(cats):
+        mask = dominant_class == cls_idx
+        if not mask.any():
+            continue
+        cls_emds = [emds[i] for i, m in enumerate(mask) if m]
+        cls_bs, _ = brier_score(comp_pred_arr[mask], comp_true_arr[mask])
+        cls_js    = jsd(comp_pred_arr[mask], comp_true_arr[mask])
+        print(
+            f"  {cls_name:<40} {mask.sum():>5d}  "
+            f"{np.mean(cls_emds):>7.4f}  {cls_js:>7.4f}  {cls_bs:>7.4f}"
+        )
+
     # Qualitative example — first day-11 cell
     print("\n  -- Example: first day-11 cell --")
     true_comp_str = "  |  ".join(f"{cats[i]}: {v:.3f}" for i, v in enumerate(comp_true_arr[0]))
