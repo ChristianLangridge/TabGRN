@@ -6,7 +6,7 @@ first N_WARMUP_STEPS (col_embedder, tf_col, tf_row, and prediction heads
 condition on real ICL representations before the ICL mechanism is exposed).
 After N_WARMUP_STEPS, tf_icl unfreezes and all components train together.
 
-warmup_final.pt is saved at the N_WARMUP_STEPS boundary — this is the
+gene_coexpression.pt is saved at the N_WARMUP_STEPS boundary — this is the
 canonical GRN extraction checkpoint (tf_col / tf_row uncontaminated by the
 ICL mechanism).
 
@@ -114,7 +114,7 @@ class _SyncingWarmupBoundaryCallback(WarmupBoundaryCallback):
         already_saved = self._saved
         super().on_epoch_end(model, dataset, step)
         if self._saved and not already_saved:
-            _git_sync(self.out_path, "warmup_final (GRN extraction point)")
+            _git_sync(self.out_path, "gene_coexpression (GRN extraction point)")
 
 
 
@@ -408,7 +408,7 @@ def main() -> None:
     print(f"  h5ad            : {H5AD_PATH}")
     print(f"  backbone        : {BACKBONE_PATH}")
     print(f"  n_steps         : {N_STEPS}  (warmup: {N_WARMUP_STEPS}, icl: {N_STEPS - N_WARMUP_STEPS})")
-    print(f"  warmup_final.pt : saved at step {N_WARMUP_STEPS}  (GRN extraction point)")
+    print(f"  gene_coexpression.pt : saved at step {N_WARMUP_STEPS}  (GRN extraction point)")
     print("=" * 60)
 
     # 2. Model
@@ -457,7 +457,7 @@ def main() -> None:
     )
     warmup_boundary_cb = _SyncingWarmupBoundaryCallback(
         save_step             = N_WARMUP_STEPS,
-        out_path              = ckpt_dir / "warmup_final.pt",
+        out_path              = ckpt_dir / "gene_coexpression.pt",
         loss_fn               = loss_fn,
         run_id                = cfg.run_id,
         composition_loss_type = m.composition_loss_type,

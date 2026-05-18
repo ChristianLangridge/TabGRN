@@ -67,7 +67,7 @@ class CheckpointCallback:
 class WarmupBoundaryCallback:
     """Save a named checkpoint once at exactly ``save_step``.
 
-    Intended for saving ``warmup_final.pt`` at the ICL warm-up boundary —
+    Intended for saving ``gene_coexpression.pt`` at the ICL warm-up boundary —
     the canonical GRN extraction point where tf_icl has not yet trained.
 
     Parameters
@@ -119,5 +119,5 @@ class WarmupBoundaryCallback:
             },
             self.out_path,
         )
-        print(f"  [warmup_final] GRN extraction checkpoint saved → {self.out_path}")
+        print(f"  [gene_coexpression] GRN extraction checkpoint saved → {self.out_path}")
         self._saved = True
