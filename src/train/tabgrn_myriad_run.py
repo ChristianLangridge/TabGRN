@@ -1,11 +1,14 @@
 """
 tabgrn_myriad_run.py — Full training run for TabGRN on Myriad HPC.
 
-Training strategy
------------------
-Phase 1   — Supervised fine-tuning on all non-day-11 cells; tf_icl frozen.
-Phase 1.5 — ICL warm-up; trains anchor_label_embedder with tf_icl still frozen.
-Phase 2   — ICL inference on day-11 queries (separate eval script).
+Single ICL training run using Trainer throughout. tf_icl is frozen for the
+first N_WARMUP_STEPS (col_embedder, tf_col, tf_row, and prediction heads
+condition on real ICL representations before the ICL mechanism is exposed).
+After N_WARMUP_STEPS, tf_icl unfreezes and all components train together.
+
+warmup_final.pt is saved at the N_WARMUP_STEPS boundary — this is the
+canonical GRN extraction checkpoint (tf_col / tf_row uncontaminated by the
+ICL mechanism).
 
 Two experimental presets selected by the RUN_PRESET env var:
 
@@ -22,12 +25,11 @@ Required env vars (set in job script):
     BACKBONE       — absolute path to tabicl-regressor-v2-20260212.ckpt
 
 Optional env vars:
-    RUN_PRESET          — "dirichlet" (default) | "kl"
-    N_EPOCHS            — passes over the non-day-11 cell pool (default: 3)
-    N_ICL_WARMUP_STEPS  — ICL warm-up steps (default: 1000)
-    SEED                — integer RNG seed (default: 42)
-    DEVICE              — "cpu" | "cuda"  (auto-detected if not set)
-    PHASE1_CHECKPOINT   — path to a phase1_final.pt to skip Phase 1 entirely
+    RUN_PRESET      — "dirichlet" (default) | "kl"
+    N_STEPS         — total training steps (default: 15000)
+    N_WARMUP_STEPS  — steps before tf_icl unfreezes (default: 10000)
+    SEED            — integer RNG seed (default: 42)
+    DEVICE          — "cpu" | "cuda"  (auto-detected if not set)
 """
 import math
 import os
@@ -38,7 +40,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-
 from spatialmt.config.experiment import ExperimentConfig
 from spatialmt.config.paths import PROJECT_ROOT
 from spatialmt.context.builder import CellTableBuilder
@@ -46,17 +47,17 @@ from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DirichletDualHeadLoss, DualHeadLoss
 from spatialmt.model.tabgrn import TabICLRegressor
-from spatialmt.training.callbacks import CheckpointCallback
-from spatialmt.training.trainer import SupervisedTrainer, Trainer
+from spatialmt.training.callbacks import CheckpointCallback, WarmupBoundaryCallback
+from spatialmt.training.trainer import Trainer
 
 # ---------------------------------------------------------------------------
 # Run settings
 # ---------------------------------------------------------------------------
 
-N_EPOCHS           = int(os.environ.get("N_EPOCHS", "3"))
-N_ICL_WARMUP_STEPS = int(os.environ.get("N_ICL_WARMUP_STEPS", "1000"))
-SEED               = int(os.environ.get("SEED", "42"))
-JOB_ID             = os.environ.get("JOB_ID", "local")
+N_STEPS        = int(os.environ.get("N_STEPS",        "25000"))
+N_WARMUP_STEPS = int(os.environ.get("N_WARMUP_STEPS", "10000"))
+SEED           = int(os.environ.get("SEED", "42"))
+JOB_ID         = os.environ.get("JOB_ID", "local")
 
 _RUN_PRESET = os.environ.get("RUN_PRESET", "dirichlet").lower()
 if _RUN_PRESET not in {"kl", "dirichlet"}:
@@ -70,8 +71,6 @@ if not H5AD_PATH:
         "H5AD_PATH env var is not set.\n"
         "Add: export H5AD_PATH=/path/to/neurectoderm_with_pseudotime.h5ad"
     )
-
-PHASE1_CHECKPOINT = os.environ.get("PHASE1_CHECKPOINT")
 
 BACKBONE_PATH = os.environ.get("BACKBONE")
 if not BACKBONE_PATH:
@@ -97,20 +96,30 @@ def _detect_device() -> torch.device:
 
 
 # ---------------------------------------------------------------------------
-# Callback — step-progress heartbeat (matches debug run style)
+# Callbacks
 # ---------------------------------------------------------------------------
 
 class ProgressCallback:
-    def __init__(self, n_steps: int, phase: str = "") -> None:
+    def __init__(self, n_steps: int) -> None:
         self._n_steps = n_steps
-        self._phase   = f"[{phase}] " if phase else ""
 
     def on_epoch_end(self, _model, _dataset, step: int) -> None:
-        print(f"  {self._phase}checkpoint step {step:>6d}/{self._n_steps}")
+        print(f"  checkpoint step {step:>6d}/{self._n_steps}")
+
+
+class _SyncingWarmupBoundaryCallback(WarmupBoundaryCallback):
+    """WarmupBoundaryCallback that also git-syncs after saving."""
+
+    def on_epoch_end(self, model, dataset, step: int) -> None:
+        already_saved = self._saved
+        super().on_epoch_end(model, dataset, step)
+        if self._saved and not already_saved:
+            _git_sync(self.out_path, "warmup_final (GRN extraction point)")
+
 
 
 # ---------------------------------------------------------------------------
-# Sanity checks — mirrors debug run; called after each training phase
+# Sanity checks
 # ---------------------------------------------------------------------------
 
 def _sanity_checks(
@@ -118,10 +127,8 @@ def _sanity_checks(
     loss_fn,
     model: TabICLRegressor,
     global_step: int,
-    warmup_col_steps: int,
-    phase: str,
 ) -> None:
-    print(f"\nSanity checks ({phase}):")
+    print("\nSanity checks:")
 
     for k, v in metrics.items():
         if not isinstance(v, (int, float)):
@@ -140,11 +147,16 @@ def _sanity_checks(
         print(f"  OK    lambda_comp (fixed) = {loss_fn.lambda_comp:.4f}")
 
     col_frozen = all(not p.requires_grad for p in model.col_embedder.parameters())
-    if col_frozen:
-        remaining = warmup_col_steps - global_step
-        print(f"  OK    col_embedder frozen ({remaining} warmup steps remaining)")
+    status = "frozen" if col_frozen else "unfrozen (warmup complete)"
+    print(f"  OK    col_embedder {status}")
+
+    icl_frozen = all(not p.requires_grad for p in model.tf_icl.parameters())
+    if global_step < N_WARMUP_STEPS:
+        tag = "OK  " if icl_frozen else "FAIL"
+        print(f"  {tag}  tf_icl frozen ({N_WARMUP_STEPS - global_step} warmup steps remaining)")
     else:
-        print("  OK    col_embedder unfrozen (warmup complete)")
+        tag = "OK  " if not icl_frozen else "FAIL"
+        print(f"  {tag}  tf_icl unfrozen (warmup complete at step {N_WARMUP_STEPS})")
 
     head_ok = all(p.requires_grad for p in model.pseudotime_head.parameters())
     tag = "OK  " if head_ok else "FAIL"
@@ -152,7 +164,7 @@ def _sanity_checks(
 
     history = metrics.get("loss_history", [])
     if history:
-        print(f"\n  Loss progression ({phase}):")
+        print("\n  Loss progression:")
         print(f"  {'step':>6}  {'total':>10}  {'pt':>8}  {'comp':>10}")
         for entry in history:
             print(
@@ -164,7 +176,7 @@ def _sanity_checks(
 
 
 # ---------------------------------------------------------------------------
-# Inference check — mirrors debug run exactly
+# Inference check
 # ---------------------------------------------------------------------------
 
 def _inference_check(
@@ -207,12 +219,12 @@ def _inference_check(
             med = float(np.median(dataset.pseudotime[mask]))
             print(f"    D{day:>2d} : {med:.4f}  (n={mask.sum()})")
 
-    n_day11 = len(day11_ids)
+    n_day11   = len(day11_ids)
+    log_every = max(1, n_day11 // 10)
     print(f"\n  Running forward pass over {n_day11} day-11 cells ...")
     model.eval()
     pt_preds:   list[float] = []
     comp_preds: list[list[float]] = []
-    log_every = max(1, n_day11 // 10)
 
     with torch.no_grad():
         for i, cid in enumerate(day11_ids):
@@ -223,7 +235,7 @@ def _inference_check(
             pt_out, comp_out = model(batch)
             pt_preds.append(pt_out[0].item())
             if loss_type == "dirichlet":
-                alpha = comp_out[0]
+                alpha = comp_out[0].clamp(min=1e-6)
                 comp_preds.append((alpha / alpha.sum()).cpu().tolist())
             else:
                 comp_preds.append(comp_out[0].cpu().tolist())
@@ -246,7 +258,7 @@ def _inference_check(
     pt_mae  = mae(pt_pred_arr, pt_true_arr)
     day_rho = per_day_spearman(pt_pred_arr, pt_true_arr, day11_days_arr)
 
-    cost_m = dataset.centroid_distances.astype(np.float64)
+    cost_m   = dataset.centroid_distances.astype(np.float64)
     nan_mask = np.isnan(comp_pred_arr).any(axis=1)
     if nan_mask.any():
         print(f"  WARNING: {nan_mask.sum()} / {len(day11_ids)} cells have NaN composition predictions — skipping for EMD")
@@ -261,10 +273,10 @@ def _inference_check(
         ))
         if (i + 1) % log_every == 0 or (i + 1) == len(day11_ids):
             print(f"  emd     {i + 1}/{len(day11_ids)}")
-    mean_emd             = float(np.mean(emds)) if emds else float("nan")
-    baseline             = wasserstein_baseline(dataset.soft_labels, train_mask, cost_m)
+    mean_emd              = float(np.mean(emds)) if emds else float("nan")
+    baseline              = wasserstein_baseline(dataset.soft_labels, train_mask, cost_m)
     bs_mean, bs_per_class = brier_score(comp_pred_arr, comp_true_arr)
-    js                   = jsd(comp_pred_arr, comp_true_arr)
+    js                    = jsd(comp_pred_arr, comp_true_arr)
 
     print("\n  -- Pseudotime head --")
     print(f"  Spearman ρ   : {rho:+.4f}   (primary accuracy)")
@@ -302,7 +314,6 @@ def _save_loss_curve(
     ckpt_dir,
     run_id: str,
     comp_label: str,
-    phase: str,
 ) -> None:
     if not history:
         return
@@ -322,9 +333,9 @@ def _save_loss_curve(
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle(f"TabGRN {phase} — {run_id}  [{comp_label}]", y=1.02)
+    fig.suptitle(f"TabGRN — {run_id}  [{comp_label}]", y=1.02)
     fig.tight_layout()
-    curve_path = ckpt_dir / f"loss_curve_{phase.replace(' ', '_')}.png"
+    curve_path = ckpt_dir / "loss_curve.png"
     fig.savefig(str(curve_path), dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"Loss curve saved to {curve_path}")
@@ -335,7 +346,6 @@ def _save_loss_curve(
 # ---------------------------------------------------------------------------
 
 def _git_sync(path, label: str) -> None:
-    """Stage, commit, and push a checkpoint file/directory to the remote."""
     rel = str(path)
     cmds = [
         ["git", "-C", str(PROJECT_ROOT), "add", rel],
@@ -362,6 +372,19 @@ def main() -> None:
     np.random.seed(SEED)
 
     comp_label = "Dirichlet NLL" if _RUN_PRESET == "dirichlet" else "KL divergence"
+    m = cfg.model
+
+    print("=" * 60)
+    print("TabGRN Myriad job")
+    print(f"  Job ID      : {JOB_ID}")
+    print(f"  GPU         : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'}")
+    print(f"  RUN_PRESET  : {_RUN_PRESET}")
+    print(f"  N_STEPS     : {N_STEPS}")
+    print(f"  N_WARMUP    : {N_WARMUP_STEPS}  (tf_icl frozen until this step)")
+    print(f"  PROJECT_ROOT: {PROJECT_ROOT}")
+    print(f"  H5AD_PATH   : {H5AD_PATH}")
+    print(f"  BACKBONE    : {BACKBONE_PATH}")
+    print("=" * 60)
 
     # 1. Data
     print("\n[1/3] Loading data ...")
@@ -372,12 +395,6 @@ def main() -> None:
         f"({time.time() - t0:.1f}s)"
     )
 
-    n_train_cells   = sum(1 for d in dataset.collection_day if int(d) != 11)
-    batch_size      = cfg.model.supervised_batch_size
-    steps_per_epoch = int(np.ceil(n_train_cells / batch_size))
-    n_steps         = N_EPOCHS * steps_per_epoch
-    eval_every      = max(50, steps_per_epoch // 4)
-
     print("=" * 60)
     print("TabGRN Myriad run")
     print(f"  preset          : {_RUN_PRESET}  ({comp_label})  run_id={cfg.run_id}")
@@ -385,27 +402,17 @@ def main() -> None:
     print(f"  seed            : {SEED}")
     print(f"  max_genes       : {cfg.data.max_genes}")
     print(f"  n_bins          : {cfg.context.n_bins}  cells_per_bin: {cfg.context.cells_per_bin}")
-    print(f"  embed_dim       : {cfg.model.embed_dim}  "
-          f"d_model: {cfg.model.num_cls * cfg.model.embed_dim}  "
-          f"n_heads: {cfg.model.n_heads}")
+    print(f"  embed_dim       : {m.embed_dim}  "
+          f"d_model: {m.num_cls * m.embed_dim}  "
+          f"n_heads: {m.n_heads}")
     print(f"  h5ad            : {H5AD_PATH}")
     print(f"  backbone        : {BACKBONE_PATH}")
-    print("  --- Phase 1: supervised fine-tuning ---")
-    print(f"  n_train_cells   : {n_train_cells}")
-    print(f"  supervised_batch: {batch_size}")
-    print(f"  n_epochs        : {N_EPOCHS}")
-    print(f"  steps_per_epoch : {steps_per_epoch}")
-    print(f"  n_steps         : {n_steps}")
-    print(f"  tf_icl          : FROZEN")
-    print("  --- Phase 1.5: ICL warm-up ---")
-    print(f"  n_icl_warmup    : {N_ICL_WARMUP_STEPS}")
-    print(f"  col_embedder    : immediately trainable (warmup_col_steps=0)")
-    print(f"  tf_icl          : FROZEN")
+    print(f"  n_steps         : {N_STEPS}  (warmup: {N_WARMUP_STEPS}, icl: {N_STEPS - N_WARMUP_STEPS})")
+    print(f"  warmup_final.pt : saved at step {N_WARMUP_STEPS}  (GRN extraction point)")
     print("=" * 60)
 
     # 2. Model
     print("\n[2/3] Initialising model ...")
-    m = cfg.model
     model = TabICLRegressor(
         n_genes               = dataset.n_genes,
         k                     = cfg.data.n_cell_states,
@@ -423,149 +430,90 @@ def main() -> None:
     model.load_backbone(BACKBONE_PATH)
 
     n_params        = sum(p.numel() for p in model.parameters())
-    n_frozen_params = sum(p.numel() for p in model.tf_icl.parameters())
+    n_icl_params    = sum(p.numel() for p in model.tf_icl.parameters())
     print(f"  Parameters total  : {n_params:,}")
-    print(f"  tf_icl (frozen)   : {n_frozen_params:,}")
-    print(f"  Trainable         : {n_params - n_frozen_params:,}")
+    print(f"  tf_icl            : {n_icl_params:,}  (frozen until step {N_WARMUP_STEPS})")
+    print(f"  Initially trainable: {n_params - n_icl_params:,}")
 
     loss_fn = (
         DirichletDualHeadLoss() if m.composition_loss_type == "dirichlet"
         else DualHeadLoss()
     ).to(device)
 
-    # 3. Phase 1 — supervised fine-tuning
+    # 3. Train
+    cfg.model.warmup_icl_steps = N_WARMUP_STEPS
+    cfg.model.warmup_col_steps = 0  # col_embedder trainable from step 0
+
     ckpt_dir = PROJECT_ROOT / "experiments" / cfg.run_id / "checkpoints"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    if PHASE1_CHECKPOINT:
-        print(f"\n[3/3] Phase 1: skipped — loading {PHASE1_CHECKPOINT}  [{time.strftime('%H:%M:%S')}]")
-        _p1 = torch.load(PHASE1_CHECKPOINT, map_location=device)
-        model.load_state_dict(_p1["model_state"])
-        loss_fn.load_state_dict(_p1["loss_fn_state"])
-    else:
-        print(f"\n[3/3] Phase 1: supervised fine-tuning "
-              f"({N_EPOCHS} epochs × {steps_per_epoch} steps/epoch) ...  [{time.strftime('%H:%M:%S')}]\n")
+    eval_every = max(100, N_STEPS // 20)
 
-        checkpoint_cb = CheckpointCallback(
-            trainer = None,
-            loss_fn = loss_fn,
-            out_dir = ckpt_dir,
-            every   = eval_every,
-        )
-        trainer = SupervisedTrainer(
-            model      = model,
-            dataset    = dataset,
-            loss_fn    = loss_fn,
-            config     = cfg,
-            n_epochs   = N_EPOCHS,
-            eval_every = eval_every,
-            callbacks  = [ProgressCallback(n_steps, "Phase 1"), checkpoint_cb],
-            seed       = SEED,
-        )
-        checkpoint_cb.trainer = trainer
-
-        t0 = time.time()
-        metrics = trainer.fit()
-        elapsed_p1 = time.time() - t0
-
-        print("\n" + "=" * 60)
-        print("Phase 1 complete")
-        print(f"  elapsed     : {elapsed_p1:.1f}s  ({elapsed_p1 / n_steps:.3f}s/step)")
-        print(f"  train_loss  : {metrics['train_loss']:.4f}")
-        print(f"  pt_loss     : {metrics['pt_loss']:.4f}")
-        print(f"  comp_loss   : {metrics['comp_loss']:.4f}")
-        print("=" * 60)
-
-        _sanity_checks(metrics, loss_fn, model, trainer.global_step,
-                       cfg.model.warmup_col_steps, "Phase 1")
-        _save_loss_curve(metrics["loss_history"], ckpt_dir, cfg.run_id, comp_label, "phase1")
-
-        final_path = ckpt_dir / "phase1_final.pt"
-        torch.save(
-            {
-                "model_state":           model.state_dict(),
-                "loss_fn_state":         loss_fn.state_dict(),
-                "run_id":                cfg.run_id,
-                "composition_loss_type": m.composition_loss_type,
-                "global_step":           trainer.global_step,
-            },
-            final_path,
-        )
-        print(f"\nPhase 1 model saved to {final_path}")
-        _git_sync(final_path, "phase1")
-
-    # Phase 1.5 — ICL warm-up
-    print(f"\n[Phase 1.5] ICL warm-up for {N_ICL_WARMUP_STEPS} steps ...  [{time.strftime('%H:%M:%S')}]\n")
-
-    warmup_cfg = ExperimentConfig.icl_warmup_preset(
-        run_id=cfg.run_id + "_warmup",
-        composition_loss_type=m.composition_loss_type,
-        n_warmup_steps=N_ICL_WARMUP_STEPS,
-    )
-    warmup_ckpt_dir = PROJECT_ROOT / "experiments" / cfg.run_id / "warmup_checkpoints"
-    warmup_ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-    warmup_checkpoint_cb = CheckpointCallback(
+    ckpt_cb = CheckpointCallback(
         trainer = None,
         loss_fn = loss_fn,
-        out_dir = warmup_ckpt_dir,
-        every   = N_ICL_WARMUP_STEPS // 2,
+        out_dir = ckpt_dir,
+        every   = max(500, N_STEPS // 10),
     )
-    sampler = ContextSampler(dataset, warmup_cfg.context)
+    warmup_boundary_cb = _SyncingWarmupBoundaryCallback(
+        save_step             = N_WARMUP_STEPS,
+        out_path              = ckpt_dir / "warmup_final.pt",
+        loss_fn               = loss_fn,
+        run_id                = cfg.run_id,
+        composition_loss_type = m.composition_loss_type,
+    )
+    sampler = ContextSampler(dataset, cfg.context)
     builder = CellTableBuilder(dataset)
-    warmup_trainer = Trainer(
+    trainer = Trainer(
         model      = model,
         dataset    = dataset,
         sampler    = sampler,
         builder    = builder,
         loss_fn    = loss_fn,
-        config     = warmup_cfg,
-        n_steps    = N_ICL_WARMUP_STEPS,
-        eval_every = N_ICL_WARMUP_STEPS // 10,
-        callbacks  = [ProgressCallback(N_ICL_WARMUP_STEPS, "Phase 1.5"), warmup_checkpoint_cb],
+        config     = cfg,
+        n_steps    = N_STEPS,
+        eval_every = eval_every,
+        callbacks  = [ProgressCallback(N_STEPS), ckpt_cb, warmup_boundary_cb],
         seed       = SEED,
     )
-    warmup_checkpoint_cb.trainer = warmup_trainer
+    ckpt_cb.trainer = trainer
 
-    t_warmup = time.time()
-    warmup_metrics = warmup_trainer.fit()
-    elapsed_warmup = time.time() - t_warmup
+    print(f"\n[3/3] Training for {N_STEPS} steps ...  [{time.strftime('%H:%M:%S')}]\n")
+    t0 = time.time()
+    metrics = trainer.fit()
+    elapsed = time.time() - t0
 
     print("\n" + "=" * 60)
-    print("Phase 1.5 complete")
-    print(f"  elapsed     : {elapsed_warmup:.1f}s  ({elapsed_warmup / N_ICL_WARMUP_STEPS:.3f}s/step)")
-    print(f"  train_loss  : {warmup_metrics['train_loss']:.4f}")
-    print(f"  pt_loss     : {warmup_metrics['pt_loss']:.4f}")
-    print(f"  comp_loss   : {warmup_metrics['comp_loss']:.4f}")
+    print("Training complete")
+    print(f"  elapsed     : {elapsed:.1f}s  ({elapsed / N_STEPS:.3f}s/step)")
+    print(f"  train_loss  : {metrics['train_loss']:.4f}")
+    print(f"  pt_loss     : {metrics['pt_loss']:.4f}")
+    print(f"  comp_loss   : {metrics['comp_loss']:.4f}")
     print("=" * 60)
 
-    _sanity_checks(warmup_metrics, loss_fn, model, warmup_trainer.global_step,
-                   warmup_cfg.model.warmup_col_steps, "Phase 1.5")
-    _save_loss_curve(warmup_metrics["loss_history"], warmup_ckpt_dir, cfg.run_id,
-                     comp_label, "phase1.5")
+    _sanity_checks(metrics, loss_fn, model, trainer.global_step)
+    _save_loss_curve(metrics["loss_history"], ckpt_dir, cfg.run_id, comp_label)
 
-    warmup_final_path = warmup_ckpt_dir / "warmup_final.pt"
+    final_path = ckpt_dir / "final.pt"
     torch.save(
         {
             "model_state":           model.state_dict(),
             "loss_fn_state":         loss_fn.state_dict(),
             "run_id":                cfg.run_id,
             "composition_loss_type": m.composition_loss_type,
-            "global_step":           warmup_trainer.global_step,
+            "global_step":           trainer.global_step,
         },
-        warmup_final_path,
+        final_path,
     )
-    print(f"\nPre-ICL checkpoint saved to {warmup_final_path}")
-    _git_sync(warmup_final_path, "phase1.5")
+    print(f"\nFinal checkpoint saved to {final_path}")
+    _git_sync(final_path, "final")
 
-    # Inference check on day-11 held-out cells
-    print(f"\n[Phase 2] Inference on day-11 held-out cells ...  [{time.strftime('%H:%M:%S')}]")
+    # Inference on day-11 held-out cells
+    print(f"\n[Inference] Day-11 held-out cells ...  [{time.strftime('%H:%M:%S')}]")
     _inference_check(model, dataset, sampler, builder, device, _RUN_PRESET)
 
     cfg.save()
-    warmup_cfg.save()
     print(f"\nConfig saved to experiments/{cfg.run_id}/config.json")
-    print(f"Warmup config saved to experiments/{warmup_cfg.run_id}/config.json")
     _git_sync(PROJECT_ROOT / "experiments" / cfg.run_id, "final (configs + loss curves)")
 
 

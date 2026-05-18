@@ -12,7 +12,7 @@ from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DualHeadLoss
 from spatialmt.model.tabgrn import TabICLRegressor
-from spatialmt.training.callbacks import CheckpointCallback
+from spatialmt.training.callbacks import CheckpointCallback, WarmupBoundaryCallback
 from spatialmt.training.trainer import Trainer
 
 
@@ -196,3 +196,75 @@ class TestCheckpointRestore:
         fresh_loss.load_state_dict(ckpt["loss_fn_state"])
         assert torch.isfinite(fresh_loss.log_sigma_sq_pt)
         assert torch.isfinite(fresh_loss.log_sigma_sq_comp)
+
+
+# ---------------------------------------------------------------------------
+# 5. WarmupBoundaryCallback
+# ---------------------------------------------------------------------------
+
+def _make_warmup_cb(tmp_path, save_step: int) -> WarmupBoundaryCallback:
+    trainer = _make_trainer()
+    return WarmupBoundaryCallback(
+        save_step             = save_step,
+        out_path              = tmp_path / "warmup_final.pt",
+        loss_fn               = trainer.loss_fn,
+        run_id                = "test_run",
+        composition_loss_type = "kl",
+    )
+
+
+class TestWarmupBoundaryCallback:
+    def test_saves_at_exact_step(self, tmp_path):
+        trainer = _make_trainer(n_steps=4, eval_every=1)
+        cb = _make_warmup_cb(tmp_path, save_step=2)
+        cb.loss_fn = trainer.loss_fn
+        trainer.callbacks = [cb]
+        trainer.fit()
+        assert (tmp_path / "warmup_final.pt").exists()
+
+    def test_does_not_save_before_step(self, tmp_path):
+        # n_steps=1, save_step=5 — boundary never reached
+        trainer = _make_trainer(n_steps=1, eval_every=1)
+        cb = _make_warmup_cb(tmp_path, save_step=5)
+        cb.loss_fn = trainer.loss_fn
+        trainer.callbacks = [cb]
+        trainer.fit()
+        assert not (tmp_path / "warmup_final.pt").exists()
+
+    def test_saves_only_once(self, tmp_path):
+        # save_step=1, run for 3 steps — must not overwrite after first save
+        trainer = _make_trainer(n_steps=3, eval_every=1)
+        cb = _make_warmup_cb(tmp_path, save_step=1)
+        cb.loss_fn = trainer.loss_fn
+        trainer.callbacks = [cb]
+        trainer.fit()
+        path = tmp_path / "warmup_final.pt"
+        assert path.exists()
+        mtime = path.stat().st_mtime
+        # re-fire manually at a later step — should not overwrite
+        cb.on_epoch_end(trainer.model, trainer.dataset, step=3)
+        assert path.stat().st_mtime == mtime
+
+    def test_checkpoint_contents(self, tmp_path):
+        trainer = _make_trainer(n_steps=2, eval_every=1)
+        cb = _make_warmup_cb(tmp_path, save_step=2)
+        cb.loss_fn = trainer.loss_fn
+        trainer.callbacks = [cb]
+        trainer.fit()
+        ckpt = torch.load(tmp_path / "warmup_final.pt", map_location="cpu", weights_only=True)
+        assert ckpt["run_id"] == "test_run"
+        assert ckpt["composition_loss_type"] == "kl"
+        assert ckpt["global_step"] == 2
+        assert isinstance(ckpt["model_state"], dict) and len(ckpt["model_state"]) > 0
+        assert "loss_fn_state" in ckpt
+
+    def test_fires_on_first_step_at_or_past_boundary(self, tmp_path):
+        # eval_every=2 so callbacks fire at steps 2, 4; save_step=3
+        # first fire at or past boundary is step 4
+        trainer = _make_trainer(n_steps=4, eval_every=2)
+        cb = _make_warmup_cb(tmp_path, save_step=3)
+        cb.loss_fn = trainer.loss_fn
+        trainer.callbacks = [cb]
+        trainer.fit()
+        ckpt = torch.load(tmp_path / "warmup_final.pt", map_location="cpu", weights_only=True)
+        assert ckpt["global_step"] == 4

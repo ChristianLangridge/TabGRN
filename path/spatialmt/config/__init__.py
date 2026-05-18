@@ -6,9 +6,6 @@ from spatialmt.config.experiment import (
     DataConfig,
     ContextConfig,
     ModelConfig,
-    ExplainabilityConfig,
-    PerturbationConfig,
-    BenchmarkConfig,
     ConfigurationError,
     HARDWARE_TIERS,
 )
@@ -16,6 +13,5 @@ from spatialmt.config.experiment import (
 __all__ = [
     "Dirs", "Paths", "PROJECT_ROOT", "setup_output_dirs", "validate_raw_inputs",
     "ExperimentConfig", "DataConfig", "ContextConfig", "ModelConfig",
-    "ExplainabilityConfig", "PerturbationConfig", "BenchmarkConfig",
     "ConfigurationError", "HARDWARE_TIERS",
 ]
