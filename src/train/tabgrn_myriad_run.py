@@ -247,8 +247,13 @@ def _inference_check(
     day_rho = per_day_spearman(pt_pred_arr, pt_true_arr, day11_days_arr)
 
     cost_m = dataset.centroid_distances.astype(np.float64)
+    nan_mask = np.isnan(comp_pred_arr).any(axis=1)
+    if nan_mask.any():
+        print(f"  WARNING: {nan_mask.sum()} / {len(day11_ids)} cells have NaN composition predictions — skipping for EMD")
     emds: list[float] = []
     for i in range(len(day11_ids)):
+        if nan_mask[i]:
+            continue
         emds.append(wasserstein_1(
             comp_pred_arr[i].astype(np.float64),
             comp_true_arr[i].astype(np.float64),
@@ -256,7 +261,7 @@ def _inference_check(
         ))
         if (i + 1) % log_every == 0 or (i + 1) == len(day11_ids):
             print(f"  emd     {i + 1}/{len(day11_ids)}")
-    mean_emd             = float(np.mean(emds))
+    mean_emd             = float(np.mean(emds)) if emds else float("nan")
     baseline             = wasserstein_baseline(dataset.soft_labels, train_mask, cost_m)
     bs_mean, bs_per_class = brier_score(comp_pred_arr, comp_true_arr)
     js                   = jsd(comp_pred_arr, comp_true_arr)

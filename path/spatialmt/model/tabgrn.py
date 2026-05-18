@@ -117,7 +117,8 @@ class DirichletCompositionHead(nn.Module):
         _init_linear(self.linear, weight_std=init_std, bias_value=0.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.softplus(self.linear(x))
+        # Clamp prevents float32 softplus overflow (exp > 88 → inf; inf/inf = NaN in α/Σα)
+        return F.softplus(self.linear(x).clamp(max=80.0))
 
 
 # ---------------------------------------------------------------------------
