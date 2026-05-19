@@ -1,4 +1,4 @@
-"""spatialmt.eval.metrics — Evaluation metrics for the dual-head TabGRN model.
+"""spatialmt.eval.metrics — Evaluation metrics for the dual-head TRACE model.
 
 Pseudotime head
 ---------------

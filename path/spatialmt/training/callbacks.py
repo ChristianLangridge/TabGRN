@@ -1,4 +1,4 @@
-"""spatialmt.training.callbacks — Training callbacks for TabGRN."""
+"""spatialmt.training.callbacks — Training callbacks for TRACE."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from typing import Optional, Union
     from spatialmt.data_preparation.dataset import ProcessedDataset
     from spatialmt.model.loss import DualHeadLoss
-    from spatialmt.model.tabgrn import TabICLRegressor
+    from spatialmt.model.trace import TabICLRegressor
     from spatialmt.training.trainer import Trainer, SupervisedTrainer
 
 

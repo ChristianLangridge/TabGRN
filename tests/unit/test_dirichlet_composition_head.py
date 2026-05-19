@@ -1,7 +1,7 @@
-"""Unit tests for DirichletCompositionHead — unique coverage not in test_tabgrn_model.py.
+"""Unit tests for DirichletCompositionHead — unique coverage not in test_trace_model.py.
 
 Shape, positivity, differentiability, and wiring are tested as part of the full
-model in test_tabgrn_model.py. This file covers: constructor dimensions,
+model in test_trace_model.py. This file covers: constructor dimensions,
 softplus semantics (monotonicity, edge cases), numerical stability, and
 fine-grained gradient flow to the Linear layer.
 """
@@ -15,7 +15,7 @@ D_MODEL = 32
 
 
 def _make_head(d_model: int = D_MODEL, k: int = K):
-    from spatialmt.model.tabgrn import DirichletCompositionHead
+    from spatialmt.model.trace import DirichletCompositionHead
     return DirichletCompositionHead(d_model=d_model, k=k)
 
 

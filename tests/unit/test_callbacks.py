@@ -11,7 +11,7 @@ from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DualHeadLoss
-from spatialmt.model.tabgrn import TabICLRegressor
+from spatialmt.model.trace import TabICLRegressor
 from spatialmt.training.callbacks import CheckpointCallback, WarmupBoundaryCallback
 from spatialmt.training.trainer import Trainer
 

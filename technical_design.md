@@ -1,5 +1,5 @@
 # Technical Design Document
-## TabGRN-ICL: Tabular Foundation Model for Dynamic GRN Inference
+## TRACE-ICL: Tabular Foundation Model for Dynamic GRN Inference
 
 **Version:** 1.8.0  
 **Status:** Rotation Scope Active · Dual-Head · Full Trajectory  
@@ -41,16 +41,16 @@
 - §9.3: Week 7 end milestone marked complete
 
 **Changelog v1.5.0**
-- Renamed `tabicl.py` → `tabgrn.py` across the codebase and TDD; `test_tabicl_model.py` → `test_tabgrn_model.py`
-- §3.6: `PseudotimeHead` file path corrected from planned `model/heads/pseudotime.py` to actual `model/tabgrn.py` (all sub-modules live in one file)
+- Renamed `tabicl.py` → `trace.py` across the codebase and TDD; `test_tabicl_model.py` → `test_trace_model.py`
+- §3.6: `PseudotimeHead` file path corrected from planned `model/heads/pseudotime.py` to actual `model/trace.py` (all sub-modules live in one file)
 
 **Changelog v1.4.0**
-- §2: Directory structure updated — `data_preparation2/` merged into `data_preparation/`; `model/` marked implemented (not planned); `heads/` subdirectory removed (heads live directly in `tabgrn.py`); `training/loss.py` updated to reflect `DualHeadLoss`
+- §2: Directory structure updated — `data_preparation2/` merged into `data_preparation/`; `model/` marked implemented (not planned); `heads/` subdirectory removed (heads live directly in `trace.py`); `training/loss.py` updated to reflect `DualHeadLoss`
 - §3.5: `TabICLRegressor` fully implemented — architecture corrected; 4 parameter groups (col, row, icl, head) replacing the previously-planned 6; `AnchorLabelEmbedder` (formerly `LabelInjector`) documented; `ICLAttention` removed, replaced by pretrained `tabicl.model.encoders.Encoder` (`tf_icl`)
 - §3.7: `CompositionHead` corrected — uses `softmax` + KL divergence loss, not `softplus` + Dirichlet NLL (interim design, Dirichlet NLL planned for a later phase)
 - §3.8: `NormalisedDualLoss` replaced by `DualHeadLoss` — Kendall uncertainty weighting with learnable log σ² parameters
 - §5.1: Softplus section updated to reflect current softmax implementation
-- §8: Test counts updated — 219 unit tests GREEN; `test_tabgrn_model.py` and `test_dual_head_loss.py` marked implemented
+- §8: Test counts updated — 219 unit tests GREEN; `test_trace_model.py` and `test_dual_head_loss.py` marked implemented
 - §9.3: Week 7 milestone status updated
 
 **Changelog v1.3.0**
@@ -94,7 +94,7 @@
 
 ### 1.1 Architectural Goals
 
-TabGRN-ICL is a tabular in-context learning model for dynamic gene regulatory network (GRN) inference from single-cell RNA sequencing data. It is trained on the Jain et al. 2025 (Nature) brain organoid time-course dataset and targets two simultaneous prediction objectives:
+TRACE-ICL is a tabular in-context learning model for dynamic gene regulatory network (GRN) inference from single-cell RNA sequencing data. It is trained on the Jain et al. 2025 (Nature) brain organoid time-course dataset and targets two simultaneous prediction objectives:
 
 | Objective | Output | Head | Status |
 |---|---|---|---|
@@ -131,9 +131,9 @@ D30  n= 7950  min=0.2367  p10=0.5061  median=0.6526  p90=0.9791  max=1.0000
 ## 2. Directory Structure
 
 ```
-TabGRN/
+TRACE/
 ├── pyproject.toml                      # Package registration — pip install -e .
-├── myriad_tabgrn.sh                    # SLURM job script — rotation_finetune on Myriad GPU
+├── myriad_trace.sh                    # SLURM job script — rotation_finetune on Myriad GPU
 ├── LICENSE
 ├── README.md
 │
@@ -187,7 +187,7 @@ TabGRN/
 │       │
 │       ├── model/                      # ✓ Implemented
 │       │   ├── __init__.py
-│       │   ├── tabgrn.py               # TabICLRegressor + AnchorLabelEmbedder + SharedTrunk
+│       │   ├── trace.py               # TabICLRegressor + AnchorLabelEmbedder + SharedTrunk
 │       │   │                           # + PseudotimeHead + CompositionHead + AttentionScorer
 │       │   ├── loss.py                 # DualHeadLoss — Kendall uncertainty weighting
 │       │   └── baselines/              # [planned]
@@ -232,8 +232,8 @@ TabGRN/
 │   │   ├── cell_identity_proba.py
 │   │   └── pseudotime_regression.py
 │   └── train/
-│       ├── tabgrn_debug_run.py         # Local debug run — rotation_finetune on MPS/CPU, 500 steps
-│       ├── tabgrn_myriad_run.py        # Full Myriad run — 10,000 steps, checkpointing, loss curve
+│       ├── trace_debug_run.py         # Local debug run — rotation_finetune on MPS/CPU, 500 steps
+│       ├── trace_myriad_run.py        # Full Myriad run — 10,000 steps, checkpointing, loss curve
 │       ├── XGB_classifier_run.py       # Baseline — XGBClassifier (cell identity)
 │       ├── XGB_regressor_run.py        # Baseline — XGBRegressor (pseudotime)
 │       ├── linear_regressor_run.py     # Baseline — linear regression
@@ -245,7 +245,7 @@ TabGRN/
     ├── unit/
     │   ├── test_experiment_config.py   # ExperimentConfig — serialisation, hash, presets (32 tests) ✓
     │   ├── test_dataset.py             # ProcessedDataset schema contract (26 tests) ✓
-    │   ├── test_tabgrn_model.py        # TabICLRegressor + sub-modules (53 tests) ✓
+    │   ├── test_trace_model.py        # TabICLRegressor + sub-modules (53 tests) ✓
     │   ├── test_dual_head_loss.py      # DualHeadLoss — Kendall weighting, KL divergence (26 tests) ✓
     │   ├── test_context_sampler.py     # ContextSampler — bin assignment, sparse bin warning (22 tests) ✓
     │   ├── test_cell_table_builder.py  # CellTableBuilder + CellTable + TrainingTargets (27 tests) ✓
@@ -448,7 +448,7 @@ def icl_collate(batch: list[tuple[CellTable, TrainingTargets]]) -> ICLBatch
 ---
 
 ### 3.5 `TabICLRegressor`
-**File:** `path/spatialmt/model/tabgrn.py` ✓ Implemented
+**File:** `path/spatialmt/model/trace.py` ✓ Implemented
 
 **Purpose:** TabICLv2 backbone adapted for dual-head pseudotime regression and cell state composition. Manages differential learning rates and staged warmup.
 
@@ -482,7 +482,7 @@ def icl_collate(batch: list[tuple[CellTable, TrainingTargets]]) -> ICLBatch
 **Critical implementation details:**
 - `emb.clone()` passed to `row_interactor` — `RowInteraction._train_forward` performs an in-place write to CLS token slots; the clone prevents this from severing autograd to `col_embedder`
 - `batch.context_pseudotime` always passed as `y_train` to `col_embedder`, even though `target_aware=False` — `ColEmbedding` reads `y_train.shape[1]` unconditionally for ISAB masking
-- `tf_icl` loaded via `load_backbone(checkpoint_path)` with key remapping: `icl_predictor.tf_icl.*` → `tf_icl.*`; `col_embedder.*` keys are **always excluded** — pretrained column embeddings are position-indexed (feature order in the pretraining tabular task), not gene-name-indexed; they are reinitialised fresh for every TabGRN run
+- `tf_icl` loaded via `load_backbone(checkpoint_path)` with key remapping: `icl_predictor.tf_icl.*` → `tf_icl.*`; `col_embedder.*` keys are **always excluded** — pretrained column embeddings are position-indexed (feature order in the pretraining tabular task), not gene-name-indexed; they are reinitialised fresh for every TRACE run
 - Warmup/freeze scheduling (col: 500 steps, icl: 100 steps) implemented in `Trainer._apply_warmup_freeze()` — applied at the start of every step
 
 **Dependencies:** `torch`, `torch.nn`, `tabicl.model.embedding.ColEmbedding`, `tabicl.model.interaction.RowInteraction`, `tabicl.model.encoders.Encoder`, `spatialmt.config.experiment.ModelConfig`
@@ -490,7 +490,7 @@ def icl_collate(batch: list[tuple[CellTable, TrainingTargets]]) -> ICLBatch
 ---
 
 ### 3.6 `PseudotimeHead`
-**File:** `path/spatialmt/model/tabgrn.py` ✓ Implemented
+**File:** `path/spatialmt/model/trace.py` ✓ Implemented
 
 **Purpose:** Regression head producing a scalar pseudotime prediction in `(0, 1)` from the query cell representation.
 
@@ -512,7 +512,7 @@ nn.init.constant_(self.linear.bias, 0.5)                   # trajectory midpoint
 ---
 
 ### 3.7 `CompositionHead` and `DirichletCompositionHead`
-**File:** `path/spatialmt/model/tabgrn.py` ✓ Implemented
+**File:** `path/spatialmt/model/trace.py` ✓ Implemented
 
 Two composition heads are implemented. `TabICLRegressor` instantiates one based on `ModelConfig.composition_loss_type`.
 
@@ -649,7 +649,7 @@ total = exp(–s_pt) · L_pt + ½·s_pt + lambda_comp · L_comp
 }
 ```
 
-`loss_history` enables post-training convergence diagnosis without requiring TensorBoard on Myriad. `tabgrn_myriad_run.py` reads it and saves a 3-panel PNG to the checkpoint directory.
+`loss_history` enables post-training convergence diagnosis without requiring TensorBoard on Myriad. `trace_myriad_run.py` reads it and saves a 3-panel PNG to the checkpoint directory.
 
 **Note — effective batch size:** `icl_collate([(table, targets)])` is called with a single pair per step — batch size is always 1. `batch_size` has been removed from `HARDWARE_TIERS` (dead config). True batching (loop B query cells, pass list to `icl_collate`) is architecturally straightforward but deferred: the CPU-side `CellTableBuilder.build()` loop is the bottleneck, not GPU utilisation.
 
@@ -1029,7 +1029,7 @@ from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.collate import icl_collate, ICLBatch
-from spatialmt.model.tabgrn import TabICLRegressor
+from spatialmt.model.trace import TabICLRegressor
 from spatialmt.explainability.scorers import AttentionScorer
 from spatialmt.training.trainer import Trainer
 
@@ -1098,7 +1098,7 @@ print(comparison)
 
 ```python
 import os
-os.environ["TABGRN_CHECKPOINT"] = "experiments/rotation_001/checkpoints/best_model.pt"
+os.environ["TRACE_CHECKPOINT"] = "experiments/rotation_001/checkpoints/best_model.pt"
 
 # Run the integration test suite
 # pytest tests/integration/test_wls_perturbation.py -v
@@ -1209,7 +1209,7 @@ The failing tests span `test_trainer.py`, `test_context_sampler.py`, `test_cell_
 
 - `tests/unit/test_experiment_config.py` — 44 tests GREEN: ExperimentConfig serialisation, hash, presets, sub-config validation, lr fields
 - `tests/unit/test_dataset.py` — 32 tests GREEN: ProcessedDataset schema contract, soft label computation, manifest hash
-- `tests/unit/test_tabgrn_model.py` — 53 tests GREEN: TabICLRegressor construction, forward pass contracts, AnchorLabelEmbedder, AttentionScorer, parameter groups, gradient flow
+- `tests/unit/test_trace_model.py` — 53 tests GREEN: TabICLRegressor construction, forward pass contracts, AnchorLabelEmbedder, AttentionScorer, parameter groups, gradient flow
 - `tests/unit/test_dual_head_loss.py` — 26 tests GREEN: DualHeadLoss Kendall weighting, KL divergence component, uncertainty mechanics
 - `tests/unit/test_context_sampler.py` — failing (stale fixture)
 - `tests/unit/test_cell_table_builder.py` — failing (stale fixture)
@@ -1322,7 +1322,7 @@ pytest tests/unit/ tests/smoke/ -v
 | Week 5 end (Apr 22) | Scaffold pseudotime integrated; `PreparedData` dataclass green | ✓ Complete |
 | Week 6 (Apr 29) | Diffusion pseudotime computed and validated; `ProcessedDataset.from_anndata` implemented and integration-tested | ✓ Complete |
 | Week 7 (Apr 21) | `TabICLRegressor` + `DualHeadLoss` fully implemented; 219 unit tests GREEN; pretrained `Encoder` (tf_icl) integrated; `AnchorLabelEmbedder` formalised | ✓ Complete |
-| Week 7 end (May 6) | **`ContextSampler` + `CellTableBuilder` + `ICLBatch`/`icl_collate` implemented; training loop wired; first Myriad GPU job submitted — dual-head — critical gate** | ✓ Complete — `Trainer`, `MuonAdamW`, `CheckpointCallback` implemented; `tabgrn_myriad_run.py` wired; SLURM script ready; 300/300 unit tests GREEN |
+| Week 7 end (May 6) | **`ContextSampler` + `CellTableBuilder` + `ICLBatch`/`icl_collate` implemented; training loop wired; first Myriad GPU job submitted — dual-head — critical gate** | ✓ Complete — `Trainer`, `MuonAdamW`, `CheckpointCallback` implemented; `trace_myriad_run.py` wired; SLURM script ready; 300/300 unit tests GREEN |
 | Week 8 (May 13) | Baseline ladder (mean → ridge → XGBoost) complete; comparison table generated | |
 | Week 10 (May 27) | Biological plausibility gate — SOX2 in top-20 | |
 | Week 11 (Jun 3) | WLS perturbation Signals 1 + 2 + 3 (composition shift) passing | |
@@ -1376,14 +1376,14 @@ pytest tests/unit/ tests/smoke/ -v
 
 **Decision:** Baseline models (XGBRegressor, LinearRegressor, XGBClassifier, NearestCentroid) were trained on the **full dataset with no day 11 holdout**. The data preparation pipeline (`prep.py`, `diffusion_trajectory.py`) processes all cells together — HVG selection and diffusion pseudotime computation are performed across all timepoints including day 11.
 
-**Rationale:** The purpose of the baselines is to establish a performance floor that justifies the development of TabGRN. Introducing a day 11 holdout at this stage would create two problems:
+**Rationale:** The purpose of the baselines is to establish a performance floor that justifies the development of TRACE. Introducing a day 11 holdout at this stage would create two problems:
 
 1. *Pseudotime leakage.* Diffusion pseudotime is computed from the full cell graph. Day 11 cells participate in defining the diffusion manifold — their neighbours, eigenvectors, and DPT distances are co-determined with all other cells. Splitting post-hoc means the test labels were shaped by the test cells themselves.
 2. *HVG leakage.* Feature selection (2000 HVGs, seurat flavor) is performed on all cells. The chosen gene set is informed by day 11 variance.
 
-Training baselines on the full dataset **removes both leakage concerns** and gives each model the maximum possible information advantage. Any TabGRN improvement over these baselines is therefore a conservative lower bound — baselines had access to information TabGRN will not.
+Training baselines on the full dataset **removes both leakage concerns** and gives each model the maximum possible information advantage. Any TRACE improvement over these baselines is therefore a conservative lower bound — baselines had access to information TRACE will not.
 
-**Future holdout implementation:** When TabGRN training begins, the holdout will be introduced correctly:
+**Future holdout implementation:** When TRACE training begins, the holdout will be introduced correctly:
 - HVG selection on `collection_day != 11` cells only; gene list applied to all cells.
 - Diffusion pseudotime computed excluding day 11 cells; day 11 pseudotime assigned post-hoc via nearest neighbour in PCA space (reusing the `assign_prolif_pseudotime()` pattern already implemented in `diffusion_trajectory.py`).
 
@@ -1391,8 +1391,8 @@ Training baselines on the full dataset **removes both leakage concerns** and giv
 
 | # | Decision | Rationale |
 |---|---|---|
-| BE1 | Baselines trained on full dataset, no holdout | Eliminates pseudotime and HVG leakage; gives baselines maximum information advantage; any TabGRN gain is a conservative lower bound |
-| BE2 | Day 11 holdout deferred to TabGRN training phase | Correct holdout requires leakage-free HVG selection and post-hoc pseudotime assignment — infrastructure not needed until TabGRN is implemented |
+| BE1 | Baselines trained on full dataset, no holdout | Eliminates pseudotime and HVG leakage; gives baselines maximum information advantage; any TRACE gain is a conservative lower bound |
+| BE2 | Day 11 holdout deferred to TRACE training phase | Correct holdout requires leakage-free HVG selection and post-hoc pseudotime assignment — infrastructure not needed until TRACE is implemented |
 | BE3 | `assign_prolif_pseudotime()` reused for day 11 holdout | Pattern already implemented and tested for proliferating cells; generalises directly to day 11 exclusion without new logic |
 
 ### Implementation Decisions (v1.3.0)
@@ -1414,7 +1414,7 @@ Training baselines on the full dataset **removes both leakage concerns** and giv
 | T1 | `col_embedder.*` always excluded from `load_backbone()` | Pretrained column embeddings are position-indexed (feature order in the pretraining tabular task), not gene-name-indexed. They cannot transfer to a new gene set and must be reinitialised fresh every run. Loading them would produce a silent shape mismatch or incorrect GRN signal. |
 | T2 | `batch_size` removed from `HARDWARE_TIERS`; effective batch size = 1 | `Trainer.fit()` always calls `icl_collate([(table, targets)])` — one pair per step. `batch_size` was dead config, never consumed. True batching (loop B pairs, pass list to `icl_collate`) is straightforward but the CPU-side `build()` loop is the bottleneck; deferred post-Myriad run. |
 | T3 | `Trainer.fit()` returns `loss_history` (per-interval averages) | Single-sample gradient updates (batch=1) produce noisy step-level loss. Interval averages over `eval_every` steps smooth the signal enough to diagnose convergence without TensorBoard. Returning from `fit()` keeps the Myriad script self-contained — no external logging service needed on the cluster. |
-| T4 | `tabgrn_myriad_run.py` saves 3-panel loss curve PNG to checkpoint dir | Post-training convergence check without interactive tooling. Pseudotime and composition losses are plotted separately to distinguish which head is responsible for any plateau. |
+| T4 | `trace_myriad_run.py` saves 3-panel loss curve PNG to checkpoint dir | Post-training convergence check without interactive tooling. Pseudotime and composition losses are plotted separately to distinguish which head is responsible for any plateau. |
 | T5 | `CheckpointCallback` saves `loss_fn.state_dict()` alongside model and optimizer | `DualHeadLoss.log_sigma_sq_pt` and `log_sigma_sq_comp` are learnable `nn.Parameter` scalars (Kendall uncertainty weighting). Omitting them from the checkpoint would reset the learned task weighting on resume, distorting the early steps of any continued training run. |
 
 ### Dirichlet NLL and Loss Weighting Decisions (v1.8.0)

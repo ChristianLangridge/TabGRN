@@ -1,6 +1,6 @@
 #!/bin/bash -l
 # Batch script to run a GPU job for model fine-tuning.
-#$ -N tabgrn_rotation           # job name
+#$ -N trace_rotation           # job name
 
 #$ -l h_rt=2:00:00              # max wall-clock time
 #$ -l h_cpu=2:00:00             # max CPU time
@@ -8,9 +8,9 @@
 #$ -l gpu=1                     # one GPU
 #$ -pe smp 4                    # 4 CPU cores (shared-memory parallel env)
 #$ -l tmpfs=20G                 # local scratch on the compute node
-#$ -wd /home/$USER/Scratch/TabGRN
-#$ -o /home/zcbtcl9/Scratch/TabGRN/logs/tabgrn_$JOB_ID.out
-#$ -e /home/zcbtcl9/Scratch/TabGRN/logs/tabgrn_$JOB_ID.err
+#$ -wd /home/$USER/Scratch/TRACE
+#$ -o /home/zcbtcl9/Scratch/TRACE/logs/trace_$JOB_ID.out
+#$ -e /home/zcbtcl9/Scratch/TRACE/logs/trace_$JOB_ID.err
 #$ -m bea                       # email on Begin, End, Abort (add your address below)
 #$ -M zcbtcl9@ucl.ac.uk
 
@@ -18,10 +18,10 @@
 # Paths — adjust if cloned elsewhere on Myriad scratch
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT="$HOME/Scratch/TabGRN"
-H5AD_PATH="$HOME/Scratch/TabGRN/data/training_data/AnnData/neurectoderm_with_pseudotime.h5ad"
-BACKBONE="$HOME/Scratch/TabGRN/data/TabICLv2_checkpoint/tabicl-regressor-v2-20260212.ckpt"
-PHASE1_CHECKPOINT="$HOME/Scratch/TabGRN/experiments/rotation_002/checkpoints/phase1_final.pt"
+PROJECT_ROOT="$HOME/Scratch/TRACE"
+H5AD_PATH="$HOME/Scratch/TRACE/data/training_data/AnnData/neurectoderm_with_pseudotime.h5ad"
+BACKBONE="$HOME/Scratch/TRACE/data/TabICLv2_checkpoint/tabicl-regressor-v2-20260212.ckpt"
+PHASE1_CHECKPOINT="$HOME/Scratch/TRACE/experiments/rotation_002/checkpoints/phase1_final.pt"
 
 
 export PROJECT_ROOT H5AD_PATH BACKBONE PHASE1_CHECKPOINT
@@ -44,7 +44,7 @@ module purge
 module load python/miniconda3/24.3.0-0
 module load cuda/11.8.0/gnu-10.2.0
 source $UCL_CONDA_PATH/etc/profile.d/conda.sh
-conda activate tabgrn
+conda activate trace
 
 # ---------------------------------------------------------------------------
 # Stage h5ad to local scratch (faster random access than Lustre home)
@@ -63,7 +63,7 @@ echo "  staged: $H5AD_PATH  ($(du -sh "$H5AD_PATH" | cut -f1))"
 mkdir -p "$PROJECT_ROOT/logs"
 
 echo "============================================================"
-echo "TabGRN Myriad job"
+echo "TRACE Myriad job"
 echo "  Job ID      : $JOB_ID"
 echo "  Node        : $HOSTNAME"
 echo "  GPU         : $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'n/a')"
@@ -89,7 +89,7 @@ done
 
 cd "$PROJECT_ROOT"
 
-python -u src/train/tabgrn_myriad_run.py
+python -u src/train/trace_myriad_run.py
 
 echo "============================================================"
 echo "Job complete: $JOB_ID"

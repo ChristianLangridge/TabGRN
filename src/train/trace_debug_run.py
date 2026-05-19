@@ -1,5 +1,5 @@
 """
-tabgrn_debug_run.py — Local debug training run for TabGRN-ICL.
+trace_debug_run.py — Local debug training run for TRACE-ICL.
 
 Uses ExperimentConfig.debug_preset() (256 genes, max_context_cells=30).
 Runs 1000 gradient steps to verify the pipeline end-to-end before the full
@@ -7,7 +7,7 @@ Myriad run. Prints per-step loss and a summary at the end.
 
 Usage
 -----
-    python src/train/tabgrn_debug_run.py
+    python src/train/trace_debug_run.py
 
 Optional env vars:
     H5AD_PATH   — path to the h5ad file
@@ -45,7 +45,7 @@ from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DirichletDualHeadLoss, DualHeadLoss
-from spatialmt.model.tabgrn import TabICLRegressor
+from spatialmt.model.trace import TabICLRegressor
 from spatialmt.training.trainer import Trainer
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ def main() -> None:
         np.random.seed(SEED)
 
     print("=" * 60)
-    print("TabGRN debug run")
+    print("TRACE debug run")
     print(f"  device      : {device}")
     print(f"  seed        : {SEED if SEED is not None else '(none)'}")
     print(f"  n_steps     : {N_STEPS}")

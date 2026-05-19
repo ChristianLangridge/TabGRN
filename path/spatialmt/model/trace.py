@@ -1,4 +1,4 @@
-"""spatialmt.model.tabgrn — TabICLRegressor built on the pretrained TabICLv2 backbone."""
+"""spatialmt.model.trace — TabICLRegressor built on the pretrained TabICLv2 backbone."""
 from __future__ import annotations
 
 import torch

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from spatialmt.context.sampler import ContextSampler
     from spatialmt.data_preparation.dataset import ProcessedDataset
     from spatialmt.model.loss import DualHeadLoss
-    from spatialmt.model.tabgrn import TabICLRegressor
+    from spatialmt.model.trace import TabICLRegressor
 
 _WITHHELD_DAY: int = 11
 

@@ -27,7 +27,7 @@ K         = 8
 
 
 def _make_model(composition_loss_type: str = "kl"):
-    from spatialmt.model.tabgrn import TabICLRegressor
+    from spatialmt.model.trace import TabICLRegressor
     return TabICLRegressor(
         n_genes=N_GENES, k=K,
         embed_dim=EMBED_DIM, n_heads=N_HEADS, num_cls=NUM_CLS,

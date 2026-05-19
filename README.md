@@ -1,12 +1,12 @@
-# TabGRN
+# TRACE
 [![License: BSD-3](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg?style=flat-square)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python)](https://www.python.org/)
 [![Data Requests](https://img.shields.io/badge/data_requests-zcbtcl9%40ucl.ac.uk-informational?style=flat-square&logo=gmail)](https://github.com/ChristianLangridge)
-[![CI](https://github.com/ChristianLangridge/TabGRN/actions/workflows/tests.yml/badge.svg)](https://github.com/ChristianLangridge/TabGRN/actions/workflows/tests.yml)
+[![CI](https://github.com/ChristianLangridge/TRACE/actions/workflows/tests.yml/badge.svg)](https://github.com/ChristianLangridge/TRACE/actions/workflows/tests.yml)
 
 
 
-TabGRN is a novel PFN-style model, fine-tuned with neuroepithelial brain organoid sc-RNA-seq data for cell trajectory and identity prediction tasks. 
+TRACE is a novel PFN-style model, fine-tuned with neuroepithelial brain organoid sc-RNA-seq data for cell trajectory and identity prediction tasks. 
 
 ***Joint-rotational project at Queen Mary University London, University College London and The Alan Turing Institute under Prof. Julien Gautrot, Prof. Yanlan Mao and Dr. Isabel Palacios and Dr. Federico Nanni.***
 
@@ -44,14 +44,14 @@ TabGRN is a novel PFN-style model, fine-tuned with neuroepithelial brain organoi
 ### 1. Clone the repository 
 
 ```bash
-git https://github.com/ChristianLangridge/TabGRN.git
-cd TabGRN
+git https://github.com/ChristianLangridge/TRACE.git
+cd TRACE
 ```
 
 ### 2. Create and activate a conda environment using smt_pipeline.yml 
 
 ```bash
-conda env create -f TabGRN.yml 
+conda env create -f TRACE.yml 
 ```
 
 ---
@@ -93,13 +93,13 @@ Please ensure any new scripts avoid hardcoded paths and include basic inline doc
 
 ## Citation
 
-If you use this codebase or the TabGRN architecture in your work, please cite:
+If you use this codebase or the TRACE architecture in your work, please cite:
 
 ```
-Langridge, C. (2025–2026). TabGRN.
+Langridge, C. (2025–2026). TRACE.
 Joint-rotational project, Queen Mary University London, University College London
 and The Alan Turing Institute.
-https://github.com/ChristianLangridge/TabGRN
+https://github.com/ChristianLangridge/TRACE
 ```
 
 ---

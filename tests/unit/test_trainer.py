@@ -3,7 +3,7 @@ Unit tests for spatialmt.training.trainer.Trainer
 
 RED phase — all tests should FAIL until trainer.py is implemented.
 
-TabGRN uses amortized inference via in-context learning. This means:
+TRACE uses amortized inference via in-context learning. This means:
   - Each training step draws a fresh (query_cell, context_cells) pair via
     ContextSampler.sample() — the context is stochastic, not a fixed dataset row.
   - The pretrained backbone already knows how to do regression from context;
@@ -45,7 +45,7 @@ from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DualHeadLoss
-from spatialmt.model.tabgrn import TabICLRegressor
+from spatialmt.model.trace import TabICLRegressor
 from spatialmt.training.muon import Muon
 from spatialmt.training.trainer import MuonAdamW, Trainer
 

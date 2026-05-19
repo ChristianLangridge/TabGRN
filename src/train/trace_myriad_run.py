@@ -1,5 +1,5 @@
 """
-tabgrn_myriad_run.py — Full training run for TabGRN on Myriad HPC.
+trace_myriad_run.py — Full training run for TRACE on Myriad HPC.
 
 Single ICL training run using Trainer throughout. tf_icl is frozen for the
 first N_WARMUP_STEPS (col_embedder, tf_col, tf_row, and prediction heads
@@ -17,7 +17,7 @@ Two experimental presets selected by the RUN_PRESET env var:
 
 Usage
 -----
-    python src/train/tabgrn_myriad_run.py
+    python src/train/trace_myriad_run.py
 
 Required env vars (set in job script):
     PROJECT_ROOT   — absolute path to the cloned repo on Myriad
@@ -46,7 +46,7 @@ from spatialmt.context.builder import CellTableBuilder
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.model.loss import DirichletDualHeadLoss, DualHeadLoss
-from spatialmt.model.tabgrn import TabICLRegressor
+from spatialmt.model.trace import TabICLRegressor
 from spatialmt.training.callbacks import CheckpointCallback, WarmupBoundaryCallback
 from spatialmt.training.trainer import Trainer
 
@@ -333,7 +333,7 @@ def _save_loss_curve(
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle(f"TabGRN — {run_id}  [{comp_label}]", y=1.02)
+    fig.suptitle(f"TRACE — {run_id}  [{comp_label}]", y=1.02)
     fig.tight_layout()
     curve_path = ckpt_dir / "loss_curve.png"
     fig.savefig(str(curve_path), dpi=150, bbox_inches="tight")
@@ -375,7 +375,7 @@ def main() -> None:
     m = cfg.model
 
     print("=" * 60)
-    print("TabGRN Myriad job")
+    print("TRACE Myriad job")
     print(f"  Job ID      : {JOB_ID}")
     print(f"  GPU         : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A'}")
     print(f"  RUN_PRESET  : {_RUN_PRESET}")
@@ -396,7 +396,7 @@ def main() -> None:
     )
 
     print("=" * 60)
-    print("TabGRN Myriad run")
+    print("TRACE Myriad run")
     print(f"  preset          : {_RUN_PRESET}  ({comp_label})  run_id={cfg.run_id}")
     print(f"  device          : {device}")
     print(f"  seed            : {SEED}")
