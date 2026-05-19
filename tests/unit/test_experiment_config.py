@@ -88,18 +88,13 @@ def test_debug_preset_cells_per_bin():
 
 def test_full_finetune_max_genes():
     cfg = ExperimentConfig.full_finetune()
-    assert cfg.data.max_genes == 1024
+    assert cfg.data.max_genes == 2000
 
 
 def test_full_finetune_hardware_tier():
     cfg = ExperimentConfig.full_finetune()
     assert cfg.data.hardware_tier == "full"
 
-
-def test_full_finetune_context_fills_window():
-    """n_bins × cells_per_bin must equal max_context_cells — no wasted capacity."""
-    cfg = ExperimentConfig.full_finetune()
-    assert cfg.context.n_bins * cfg.context.cells_per_bin == cfg.context.max_context_cells
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +261,6 @@ def test_full_finetune_dirichlet_composition_loss_type():
 def test_full_finetune_dirichlet_same_context_as_kl():
     kl  = ExperimentConfig.full_finetune()
     dir = ExperimentConfig.full_finetune_dirichlet()
-    assert kl.context.n_bins             == dir.context.n_bins
     assert kl.context.cells_per_bin      == dir.context.cells_per_bin
     assert kl.context.max_context_cells  == dir.context.max_context_cells
 

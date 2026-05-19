@@ -148,11 +148,10 @@ class ModelConfig:
 # ---------------------------------------------------------------------------
 
 HARDWARE_TIERS: dict[str, dict] = {
-    # max_context_cells = n_bins × cells_per_bin + n_composition_anchors (theoretical max;
-    # day-11 bin excluded at runtime, so day-stratified cells = (n_bins-1) × cells_per_bin).
-    "debug":    {"max_genes": 256,  "max_context_cells": 40},
+    # max_context_cells = 5 active days × cells_per_bin (D11 excluded at runtime).
+    "debug":    {"max_genes": 256,  "max_context_cells": 50},
     "standard": {"max_genes": 512,  "max_context_cells": 50},
-    "full":     {"max_genes": 1024, "max_context_cells": 100},
+    "full":     {"max_genes": 2000, "max_context_cells": 50},
 }
 
 
@@ -250,7 +249,6 @@ class ExperimentConfig:
                 hardware_tier="full",
             ),
             context=ContextConfig(
-                n_bins=10,
                 cells_per_bin=10,
                 max_context_cells=tier["max_context_cells"],
             ),
@@ -263,7 +261,7 @@ class ExperimentConfig:
         tier = HARDWARE_TIERS["full"]
         model_cfg = cls._pretrained_model_config()
         model_cfg.composition_loss_type = "dirichlet"
-        model_cfg.supervised_batch_size = 8  # 1024 genes × 64 batch = 65k col ops → OOM on A100
+        model_cfg.supervised_batch_size = 4  # 2000 genes × 4 batch = 8k col ops, safe on A100
         return cls(
             run_id=run_id,
             data=DataConfig(
@@ -271,7 +269,6 @@ class ExperimentConfig:
                 hardware_tier="full",
             ),
             context=ContextConfig(
-                n_bins=10,
                 cells_per_bin=10,
                 max_context_cells=tier["max_context_cells"],
             ),

@@ -6,7 +6,7 @@
 
 
 
-TRACE is a novel multi-task PFN-style model, fine-tuned for cell developmental coordinate prediction in early human cerebral organoid sc-RNA-seq data. 
+Trajectory Representation and Composition Estimator (TRACE) is a novel multi-task PFN-style Deep Learning model, fine-tuned for cell developmental coordinate prediction in early human cerebral organoid sc-RNA-seq data. 
 
 ***Joint-rotational project at Queen Mary University London, University College London and The Alan Turing Institute under Prof. Julien Gautrot, Prof. Yanlan Mao and Dr. Isabel Palacios and Dr. Federico Nanni.***
 

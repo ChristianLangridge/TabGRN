@@ -78,12 +78,12 @@ if COMP_LOSS not in ("kl", "dirichlet"):
 #   day_pseudotime       — 20 day + 20 pseudotime = 40
 #   pseudotime_composition — 20 pseudotime + 20 composition = 40
 _SAMPLER_CONFIGS: dict[str, dict] = {
-    "day":                    {"cells_per_bin": 5, "n_pseudotime_anchors":  0, "n_composition_anchors":  0, "max_context_cells": 30},
+    "day":                    {"cells_per_bin": 10, "n_pseudotime_anchors":  0, "n_composition_anchors":  0, "max_context_cells": 50},
     "pseudotime":             {"cells_per_bin": 0, "n_pseudotime_anchors": 25, "n_composition_anchors":  0, "max_context_cells": 30},
     "composition":            {"cells_per_bin": 0, "n_pseudotime_anchors":  0, "n_composition_anchors": 25, "max_context_cells": 30},
-    "day_pseudotime":         {"cells_per_bin": 4, "n_pseudotime_anchors": 20, "n_composition_anchors":  0, "max_context_cells": 40},
-    "day_composition":        {"cells_per_bin": 4, "n_pseudotime_anchors":  0, "n_composition_anchors": 20, "max_context_cells": 40},
-    "pseudotime_composition": {"cells_per_bin": 0, "n_pseudotime_anchors": 20, "n_composition_anchors": 20, "max_context_cells": 40},
+    "day_pseudotime":         {"cells_per_bin": 3, "n_pseudotime_anchors": 13, "n_composition_anchors":  0, "max_context_cells": 30},
+    "day_composition":        {"cells_per_bin": 3, "n_pseudotime_anchors":  0, "n_composition_anchors": 13, "max_context_cells": 30},
+    "pseudotime_composition": {"cells_per_bin": 0, "n_pseudotime_anchors": 13, "n_composition_anchors": 15, "max_context_cells": 30},
 }
 
 SAMPLER = os.environ.get("SAMPLER", "day_pseudotime").lower()
