@@ -70,6 +70,28 @@ COMP_LOSS = os.environ.get("COMP_LOSS", "dirichlet").lower()
 if COMP_LOSS not in ("kl", "dirichlet"):
     raise ValueError(f"COMP_LOSS must be 'kl' or 'dirichlet', got {COMP_LOSS!r}")
 
+# Sampler ablation — controls anchor selection strategy.
+# Each mode configures (cells_per_bin, n_pseudotime_anchors, n_composition_anchors):
+#   day                  — 5 days × 5 = 25 day-stratified only (original baseline)
+#   pseudotime           — 25 pseudotime-binned, no day or composition
+#   composition          — 25 composition-stratified, no day or pseudotime
+#   day_pseudotime       — 20 day + 20 pseudotime = 40
+#   pseudotime_composition — 20 pseudotime + 20 composition = 40
+_SAMPLER_CONFIGS: dict[str, dict] = {
+    "day":                    {"cells_per_bin": 5, "n_pseudotime_anchors":  0, "n_composition_anchors":  0, "max_context_cells": 30},
+    "pseudotime":             {"cells_per_bin": 0, "n_pseudotime_anchors": 25, "n_composition_anchors":  0, "max_context_cells": 30},
+    "composition":            {"cells_per_bin": 0, "n_pseudotime_anchors":  0, "n_composition_anchors": 25, "max_context_cells": 30},
+    "day_pseudotime":         {"cells_per_bin": 4, "n_pseudotime_anchors": 20, "n_composition_anchors":  0, "max_context_cells": 40},
+    "day_composition":        {"cells_per_bin": 4, "n_pseudotime_anchors":  0, "n_composition_anchors": 20, "max_context_cells": 40},
+    "pseudotime_composition": {"cells_per_bin": 0, "n_pseudotime_anchors": 20, "n_composition_anchors": 20, "max_context_cells": 40},
+}
+
+SAMPLER = os.environ.get("SAMPLER", "day_pseudotime").lower()
+if SAMPLER not in _SAMPLER_CONFIGS:
+    raise ValueError(
+        f"SAMPLER must be one of {list(_SAMPLER_CONFIGS)}, got {SAMPLER!r}"
+    )
+
 # Ablation flags
 # FREEZE_ICL=1  — keep tf_icl frozen for all N_STEPS (simulates post-Phase-1.5 checkpoint)
 # NULL_CONTEXT=1 — run a second inference pass with zeroed context tensors
@@ -105,7 +127,14 @@ class LogCallback:
 
 def main() -> None:
     device = _detect_device()
-    cfg    = ExperimentConfig.debug_preset(run_id=f"debug_local_{COMP_LOSS}")
+    cfg    = ExperimentConfig.debug_preset(run_id=f"debug_local_{COMP_LOSS}_{SAMPLER}")
+
+    # Apply sampler mode — overrides context config from preset
+    sc = _SAMPLER_CONFIGS[SAMPLER]
+    cfg.context.cells_per_bin            = sc["cells_per_bin"]
+    cfg.context.n_pseudotime_anchors     = sc["n_pseudotime_anchors"]
+    cfg.context.n_composition_anchors    = sc["n_composition_anchors"]
+    cfg.context.max_context_cells        = sc["max_context_cells"]
 
     if SEED is not None:
         torch.manual_seed(SEED)
@@ -127,6 +156,11 @@ def main() -> None:
           f"d_model: {cfg.model.num_cls * cfg.model.embed_dim}  "
           f"n_heads: {cfg.model.n_heads}")
     print(f"  comp_loss   : {COMP_LOSS}")
+    print(f"  sampler     : {SAMPLER}  "
+          f"(day={cfg.context.cells_per_bin * len([d for d in [5,7,16,21,30]])}"
+          f"  pt={cfg.context.n_pseudotime_anchors}"
+          f"  comp={cfg.context.n_composition_anchors}"
+          f"  total={cfg.context.cells_per_bin * 5 + cfg.context.n_pseudotime_anchors + cfg.context.n_composition_anchors})")
     if FREEZE_ICL:
         print("  freeze_icl  : ON  (tf_icl frozen throughout — ablation mode)")
     if NULL_CONTEXT:

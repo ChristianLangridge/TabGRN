@@ -88,13 +88,18 @@ def _make_dataset(
     )
 
 
-def _make_config(cells_per_bin: int = CELLS_PER_BIN, allow_replacement: bool = True) -> ContextConfig:
-    # 6 bins × cells_per_bin must fit within max_context_cells
+def _make_config(
+    cells_per_bin: int = CELLS_PER_BIN,
+    allow_replacement: bool = True,
+    n_composition_anchors: int = 0,
+) -> ContextConfig:
+    max_ctx = 6 * cells_per_bin + n_composition_anchors
     return ContextConfig(
         n_bins=6,
         cells_per_bin=cells_per_bin,
-        max_context_cells=6 * cells_per_bin,
+        max_context_cells=max_ctx,
         allow_replacement=allow_replacement,
+        n_composition_anchors=n_composition_anchors,
     )
 
 
@@ -175,7 +180,7 @@ def test_sample_pseudotimes_in_unit_interval():
 # ---------------------------------------------------------------------------
 
 def test_sample_returns_correct_total_count():
-    """5 active bins (day 11 withheld) × cells_per_bin anchors."""
+    """5 active bins (day 11 withheld) × cells_per_bin anchors (no composition anchors)."""
     cells_per_bin = CELLS_PER_BIN
     ds = _make_dataset()
     cfg = _make_config(cells_per_bin=cells_per_bin)
@@ -185,6 +190,107 @@ def test_sample_returns_correct_total_count():
     n_active_bins = 5  # 6 bins minus day 11
     assert len(cell_ids) == n_active_bins * cells_per_bin
     assert len(pseudotimes) == len(cell_ids)
+
+
+def test_sample_total_count_with_composition_anchors():
+    """Total = 5 × cells_per_bin + n_composition_anchors."""
+    cells_per_bin = CELLS_PER_BIN
+    n_comp = K  # one per class
+    ds = _make_dataset()
+    cfg = _make_config(cells_per_bin=cells_per_bin, n_composition_anchors=n_comp)
+    sampler = ContextSampler(ds, cfg)
+    query_id = ds.cell_ids[0]
+    cell_ids, pseudotimes = sampler.sample(query_id, rng=np.random.default_rng(0))
+    expected = 5 * cells_per_bin + n_comp
+    assert len(cell_ids) == expected
+    assert len(pseudotimes) == expected
+
+
+def test_composition_anchors_cover_all_classes():
+    """When n_composition_anchors >= K, all K classes must appear among composition anchors."""
+    cells_per_bin = CELLS_PER_BIN
+    n_comp = K
+    ds = _make_dataset(n_cells_per_day=50)  # enough cells per class
+    cfg = _make_config(cells_per_bin=cells_per_bin, n_composition_anchors=n_comp)
+    sampler = ContextSampler(ds, cfg)
+    query_id = ds.cell_ids[0]
+    cell_ids, _ = sampler.sample(query_id, rng=np.random.default_rng(0))
+
+    # Composition anchors are appended after the day-stratified block
+    n_day_anchors = 5 * cells_per_bin
+    comp_ids = cell_ids[n_day_anchors:]
+    comp_indices = [ds.cell_ids.index(cid) for cid in comp_ids]
+    dominant_classes = set(int(ds.soft_labels[i].argmax()) for i in comp_indices)
+    assert dominant_classes == set(range(K))
+
+
+def test_composition_anchors_exclude_day11():
+    """Composition anchors must not include day-11 cells."""
+    cells_per_bin = CELLS_PER_BIN
+    ds = _make_dataset()
+    cfg = _make_config(cells_per_bin=cells_per_bin, n_composition_anchors=K)
+    sampler = ContextSampler(ds, cfg)
+    day_lookup = {cid: d for cid, d in zip(ds.cell_ids, ds.collection_day)}
+    query_id = ds.cell_ids[0]
+    cell_ids, _ = sampler.sample(query_id, rng=np.random.default_rng(0))
+    assert all(day_lookup[cid] != 11 for cid in cell_ids)
+
+
+# ---------------------------------------------------------------------------
+# Pseudotime-stratified anchors
+# The test fixture places non-day-11 cells in 3 pseudotime clusters:
+#   D5/D7 → [0.05, 0.20], D16 → [0.50, 0.55], D21/D30 → [0.70, 0.95]
+# Use n_pseudotime_bins=3 so all bins are populated after day-11 exclusion.
+# ---------------------------------------------------------------------------
+
+_N_PT_BINS = 3  # 3 populated ranges in fixture after day-11 exclusion
+
+
+def _pt_cfg(n_pt: int, n_pt_bins: int = _N_PT_BINS, cpb: int = 0, n_comp: int = 0) -> ContextConfig:
+    max_ctx = 6 * cpb + n_pt + n_comp or 30
+    return ContextConfig(
+        n_bins=6, cells_per_bin=cpb, max_context_cells=max_ctx,
+        n_pseudotime_anchors=n_pt, n_pseudotime_bins=n_pt_bins,
+        n_composition_anchors=n_comp,
+    )
+
+
+def test_pseudotime_anchors_correct_count():
+    ds = _make_dataset()
+    n_pt = _N_PT_BINS * 5
+    sampler = ContextSampler(ds, _pt_cfg(n_pt=n_pt))
+    cell_ids, pts = sampler.sample(ds.cell_ids[0], rng=0)
+    assert len(cell_ids) == n_pt
+    assert len(pts) == n_pt
+
+
+def test_pseudotime_anchors_cover_all_bins():
+    ds = _make_dataset(n_cells_per_day=50)
+    n_pt = _N_PT_BINS * 2
+    sampler = ContextSampler(ds, _pt_cfg(n_pt=n_pt))
+    cell_ids, _ = sampler.sample(ds.cell_ids[0], rng=0)
+    edges = sampler._pt_bin_edges
+    bins_hit = {
+        min(int(np.searchsorted(edges[1:], float(ds.pseudotime[ds.cell_ids.index(c)]), side="left")), _N_PT_BINS - 1)
+        for c in cell_ids
+    }
+    assert len(bins_hit) == _N_PT_BINS
+
+
+def test_day_pseudotime_mixed_count():
+    cpb, n_pt = 4, _N_PT_BINS * 4
+    ds = _make_dataset()
+    sampler = ContextSampler(ds, _pt_cfg(n_pt=n_pt, cpb=cpb))
+    cell_ids, _ = sampler.sample(ds.cell_ids[0], rng=0)
+    assert len(cell_ids) == 5 * cpb + n_pt
+
+
+def test_pseudotime_composition_mixed_count():
+    n_pt, n_comp = _N_PT_BINS * 4, K * 2
+    ds = _make_dataset(n_cells_per_day=50)
+    sampler = ContextSampler(ds, _pt_cfg(n_pt=n_pt, n_comp=n_comp))
+    cell_ids, _ = sampler.sample(ds.cell_ids[0], rng=0)
+    assert len(cell_ids) == n_pt + n_comp
 
 
 # ---------------------------------------------------------------------------

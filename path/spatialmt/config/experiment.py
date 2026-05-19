@@ -85,14 +85,23 @@ class ContextConfig:
     cells_per_bin: int = 5
     max_context_cells: int = 50
     allow_replacement: bool = True
+    n_composition_anchors: int = 0
+    n_pseudotime_anchors: int = 0
+    n_pseudotime_bins: int = 5
 
     def __post_init__(self) -> None:
-        total = self.n_bins * self.cells_per_bin
+        total = (
+            self.n_bins * self.cells_per_bin
+            + self.n_pseudotime_anchors
+            + self.n_composition_anchors
+        )
         if total > self.max_context_cells:
             raise ValueError(
-                f"n_bins ({self.n_bins}) × cells_per_bin ({self.cells_per_bin}) = {total} "
+                f"n_bins ({self.n_bins}) × cells_per_bin ({self.cells_per_bin}) "
+                f"+ n_pseudotime_anchors ({self.n_pseudotime_anchors}) "
+                f"+ n_composition_anchors ({self.n_composition_anchors}) = {total} "
                 f"exceeds max_context_cells ({self.max_context_cells}). "
-                "Increase max_context_cells or reduce n_bins/cells_per_bin."
+                "Increase max_context_cells or reduce context parameters."
             )
 
 
@@ -139,9 +148,9 @@ class ModelConfig:
 # ---------------------------------------------------------------------------
 
 HARDWARE_TIERS: dict[str, dict] = {
-    # max_context_cells = n_bins × cells_per_bin (theoretical max; day-11 bin is excluded
-    # at runtime, so actual cells fed = (n_bins-1) × cells_per_bin).
-    "debug":    {"max_genes": 256,  "max_context_cells": 30},
+    # max_context_cells = n_bins × cells_per_bin + n_composition_anchors (theoretical max;
+    # day-11 bin excluded at runtime, so day-stratified cells = (n_bins-1) × cells_per_bin).
+    "debug":    {"max_genes": 256,  "max_context_cells": 40},
     "standard": {"max_genes": 512,  "max_context_cells": 50},
     "full":     {"max_genes": 1024, "max_context_cells": 100},
 }

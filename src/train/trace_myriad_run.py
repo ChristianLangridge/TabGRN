@@ -55,7 +55,7 @@ from spatialmt.training.trainer import Trainer
 # ---------------------------------------------------------------------------
 
 N_STEPS        = int(os.environ.get("N_STEPS",        "25000"))
-N_WARMUP_STEPS = int(os.environ.get("N_WARMUP_STEPS", "10000"))
+N_WARMUP_STEPS = int(os.environ.get("N_WARMUP_STEPS", "2500"))
 SEED           = int(os.environ.get("SEED", "42"))
 JOB_ID         = os.environ.get("JOB_ID", "local")
 
