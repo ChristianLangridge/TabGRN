@@ -6,7 +6,7 @@
 
 
 
-TRACE is a novel PFN-style model, fine-tuned with neuroepithelial brain organoid sc-RNA-seq data for cell trajectory and identity prediction tasks. 
+TRACE is a novel multi-task PFN-style model, fine-tuned for cell developmental coordinate prediction in early human cerebral organoid sc-RNA-seq data. 
 
 ***Joint-rotational project at Queen Mary University London, University College London and The Alan Turing Institute under Prof. Julien Gautrot, Prof. Yanlan Mao and Dr. Isabel Palacios and Dr. Federico Nanni.***
 
