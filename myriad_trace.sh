@@ -29,7 +29,7 @@ export PROJECT_ROOT H5AD_PATH BACKBONE PHASE1_CHECKPOINT
 # Run preset — "dirichlet" uses Dirichlet NLL + fixed lambda_comp
 export RUN_PRESET=dirichlet
 export N_EPOCHS=3
-export N_ICL_WARMUP_STEPS=1000
+export N_ICL_WARMUP_STEPS=2500
 export SEED=42
 
 # Prevent fragmentation OOM: PyTorch reserves blocks that become non-contiguous;
@@ -45,6 +45,7 @@ module load python/miniconda3/24.3.0-0
 module load cuda/11.8.0/gnu-10.2.0
 source $UCL_CONDA_PATH/etc/profile.d/conda.sh
 conda activate trace
+pip install -e "$PROJECT_ROOT" --quiet
 
 # ---------------------------------------------------------------------------
 # Stage h5ad to local scratch (faster random access than Lustre home)
@@ -89,7 +90,7 @@ done
 
 cd "$PROJECT_ROOT"
 
-python -u src/train/trace_myriad_run.py
+python -u src/train/trace_myriad_run.py || { echo "ERROR: training script exited with code $?"; exit 1; }
 
 echo "============================================================"
 echo "Job complete: $JOB_ID"
