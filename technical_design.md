@@ -1,77 +1,34 @@
 # Technical Design Document
-## TRACE-ICL: Tabular Foundation Model for Dynamic GRN Inference
+## TRACE: Trajectory Representation And Composition Estimator
 
-**Version:** 1.8.0  
-**Status:** Rotation Scope Active · Dual-Head · Full Trajectory  
+**Version:** 1.9.0  
+**Status:** Run 17 submitted — full Myriad config finalised  
 **Project:** Joint rotation — Queen Mary University London / University College London  
 **Supervisors:** Dr. Julien Gautrot · Dr. Yanlan Mao · Dr. Isabel Palacios  
 **Author:** Christian Langridge  
 **Last Updated:** May 2026
 
+**Changelog v1.9.0**
+- Project renamed from TabGRN → TRACE (Trajectory Representation And Composition Estimator) throughout
+- §1.1: Framing updated — TRACE is a developmental coordinate prediction tool; GRN inference is a future direction, not the rotation deliverable
+- §3.1: `n_bins` removed entirely from `ContextConfig` (dead config — sampler always bins by the 5 active collection days at runtime); validation now uses hardcoded `5 active days × cells_per_bin`; `ExplainabilityConfig`, `AblationTarget`, `PerturbationConfig`, `BenchmarkConfig` removed from `ExperimentConfig` (stripped from codebase)
+- §3.1 presets: `rotation_finetune()`, `rotation_baselines()`, `scratch_preset()`, `no_icl_preset()` removed; `full_finetune()` updated to 2000 genes; `full_finetune_dirichlet` updated to `supervised_batch_size=4`
+- §3.3: `ContextSampler` updated — three independent anchor-selection components (day-stratified, pseudotime-stratified, composition-stratified); all three live in the same `sample()` call
+- §5.1: `DirichletCompositionHead.forward` updated to include `.clamp(max=80.0)` on softplus input (overflow fix)
+- §7.1: `HARDWARE_TIERS` updated — all tiers `max_context_cells=50` (5 active days × 10 cells); `full` tier `max_genes=2000`
+- §8.2a: Test counts updated — 405 passing, 0 failing
+- §9.1: Myriad run configuration updated for Run 18 (2000 genes, 50 context cells, warmup 2500 steps)
+- §9.3: Milestones updated through Run 17
+- §10: New decisions C1–C6 (context sampling ablation, n_bins removal, warmup fix, gene count) added
+- §11 new: Future directions — TRACE 2.0, multimodal GRN pipeline, developmental coordinate tool use case
+
 **Changelog v1.8.0**
-- §3.1: `lr_col` corrected to `1e-6` (was `1e-5`); `composition_loss_type` field added to `ModelConfig`; `rotation_finetune_dirichlet()` preset added
-- §3.5: `lr_col` in parameter groups table updated to `1e-6`; note added on `composition_loss_type` switching between `CompositionHead` and `DirichletCompositionHead`
-- §3.7: `CompositionHead` "planned upgrade" note removed — Dirichlet NLL is now implemented; `DirichletCompositionHead` documented as a parallel sub-module
-- §3.8: `DirichletDualHeadLoss` documented alongside `DualHeadLoss`; `lambda_comp=0.1` fixed-weight design decision recorded; inference-time α₀ / Var(p̂_k) readouts documented
-- §3 new §3.12: `SupervisedTrainer` documented — batched supervised fine-tuning with population anchor, `tf_icl` permanently frozen
-- §5.1: Composition activation section updated — Dirichlet NLL is now the active path for `rotation_002`; KL divergence retained for `rotation_001`
-- §8.2a: Test counts updated — 262 passing; 144 failing due to stale `ProcessedDataset` fixture missing `centroid_distances` (not a logic regression); 1 error in `test_callbacks`
-- §10: New decisions D1–D4 (Dirichlet NLL + lr_col) added
-- First debug run metrics recorded: Spearman ρ = 0.657, MAE = 0.114 on day-11 held-out cells; Wasserstein 1.51 vs 4.54 baseline
-
-**Changelog v1.7.0**
-- §2: `training/` marked ✓ Implemented; `experiments/` checkpoint dir updated to include `loss_curve.png`
-- §3 new §3.9–3.11: `Trainer`, `MuonAdamW`, and `CheckpointCallback` documented
-- §3.2: `_check_memory_feasibility` removed from key methods (dead code — never called)
-- §3.5: `load_backbone()` key-exclusion behaviour documented — `col_embedder.*` always excluded (pretrained weights are position-based, incompatible with gene-name-indexed input)
-- §5.5: Memory pre-check section removed (dead code deleted along with 3 tests)
-- §7.1: `batch_size` removed from `HARDWARE_TIERS` — training is batch=1 per step; field was never consumed by `Trainer.fit()`
-- §8.2a: Test counts updated — 300 unit tests GREEN; trainer (65) and callbacks (19) suites added; 3 dead memory-feasibility tests deleted
-- §8.3: Memory pre-check critical test removed
-- §9.3: Week 7 end milestone marked complete
-- §10: New decisions T1–T5 (training layer) added
-
-**Changelog v1.6.0**
-- §2: `context/` marked ✓ Implemented; `collate.py` added to directory listing
-- §3.3: `ContextSampler` marked ✓ Implemented; actual method signatures documented
-- §3.4: `CellTableBuilder` API corrected — actual return type is `(CellTable, TrainingTargets)`, not `np.ndarray`; `perturbation_mask` parameter removed (not implemented); `CellTable` and `TrainingTargets` dataclasses documented
-- §3.4b: New section — `ICLBatch` and `icl_collate` (collate.py) documented
-- §3.1: `AblationTarget` dataclass documented; `ModelConfig.lr_emb` added to field table
-- §8.2a: Test counts updated — 77 new tests (context_sampler: 22, cell_table_builder: 27, icl_collate: 28); total 219 unit tests GREEN
-- §9.3: Week 7 end milestone marked complete
-
-**Changelog v1.5.0**
-- Renamed `tabicl.py` → `trace.py` across the codebase and TDD; `test_tabicl_model.py` → `test_trace_model.py`
-- §3.6: `PseudotimeHead` file path corrected from planned `model/heads/pseudotime.py` to actual `model/trace.py` (all sub-modules live in one file)
-
-**Changelog v1.4.0**
-- §2: Directory structure updated — `data_preparation2/` merged into `data_preparation/`; `model/` marked implemented (not planned); `heads/` subdirectory removed (heads live directly in `trace.py`); `training/loss.py` updated to reflect `DualHeadLoss`
-- §3.5: `TabICLRegressor` fully implemented — architecture corrected; 4 parameter groups (col, row, icl, head) replacing the previously-planned 6; `AnchorLabelEmbedder` (formerly `LabelInjector`) documented; `ICLAttention` removed, replaced by pretrained `tabicl.model.encoders.Encoder` (`tf_icl`)
-- §3.7: `CompositionHead` corrected — uses `softmax` + KL divergence loss, not `softplus` + Dirichlet NLL (interim design, Dirichlet NLL planned for a later phase)
-- §3.8: `NormalisedDualLoss` replaced by `DualHeadLoss` — Kendall uncertainty weighting with learnable log σ² parameters
-- §5.1: Softplus section updated to reflect current softmax implementation
-- §8: Test counts updated — 219 unit tests GREEN; `test_trace_model.py` and `test_dual_head_loss.py` marked implemented
-- §9.3: Week 7 milestone status updated
-
-**Changelog v1.3.0**
-- §2: Directory structure updated to reflect actual layout (`data_preparation/`, `data_preparation2/`); test folder structure updated post-merge
-- §3.2: File path corrected to `data_preparation2/dataset.py`; `from_anndata` marked fully implemented (not a stub); pseudotime field updated to reflect diffusion pseudotime computed
-- §6.1: Import paths corrected to `spatialmt.data_preparation2.dataset`
-- §8.2a: Test file locations updated to `tests/integration/`; `test_dataset.py` integration suite added
-- §9.3: Week 6 milestone marked complete
-
-**Changelog v1.2.0**
-- §1: Trajectory extended to days 5–30; both heads active in rotation; pseudotime recomputed; perturbation strategy revised
-- §3.1: `DataConfig.n_cell_states=8`; `ContextConfig.n_bins=6`; `BenchmarkConfig` updated for regression baseline ladder
-- §3.2: `ProcessedDataset` evolving from `prep.py`; no train/val/test split in data prep; fields updated
-- §3.3: `ContextSampler` 6-bin layout with day 30
-- §3.5: Phase gate removed — both heads from training start; 6 parameter groups always active
-- §3.7: `CompositionHead` K=8 from `class3` annotations
-- §3.8: `NormalisedDualLoss` active from training start
-- §4: Data flow updated for dual-head rotation; perturbation flow updated for composition-primary signal
-- §8: Data preparation test architecture added
-- §9.3: Milestones updated for dual-head rotation scope
-- §10: 16 new decisions from baseline/scope/data-prep review sessions
+- §3.1: `lr_col` corrected to `1e-6`; `composition_loss_type` field added to `ModelConfig`; `rotation_finetune_dirichlet()` preset added
+- §3.5: `lr_col` in parameter groups table updated; note added on `composition_loss_type` switching
+- §3.7: `DirichletCompositionHead` documented as parallel sub-module
+- §3.8: `DirichletDualHeadLoss` documented; `lambda_comp=0.1` fixed-weight design decision recorded
+- §3.12: `SupervisedTrainer` documented
+- §10: New decisions D1–D4 added
 
 ---
 
@@ -87,6 +44,7 @@
 8. [Test Architecture](#8-test-architecture)
 9. [Deployment & Compute](#9-deployment--compute)
 10. [Decision Log](#10-decision-log)
+11. [Future Directions](#11-future-directions)
 
 ---
 
@@ -94,37 +52,41 @@
 
 ### 1.1 Architectural Goals
 
-TRACE-ICL is a tabular in-context learning model for dynamic gene regulatory network (GRN) inference from single-cell RNA sequencing data. It is trained on the Jain et al. 2025 (Nature) brain organoid time-course dataset and targets two simultaneous prediction objectives:
+TRACE (Trajectory Representation And Composition Estimator) is a tabular in-context learning model for developmental coordinate prediction from single-cell RNA sequencing data. It is trained on the Jain et al. 2025 (Nature) brain organoid time-course dataset and targets two simultaneous prediction objectives:
 
 | Objective | Output | Head | Status |
 |---|---|---|---|
-| Pseudotime regression | Scalar ∈ (0, 1) — developmental progression | `PseudotimeHead` | **Rotation scope — active** |
-| Cell state composition | K-vector of Dirichlet parameters — lineage identity | `CompositionHead` | **Rotation scope — active** |
+| Pseudotime regression | Scalar ∈ (0, 1) — developmental progression | `PseudotimeHead` | **Active — rotation deliverable** |
+| Cell state composition | K-vector of Dirichlet parameters — lineage identity | `DirichletCompositionHead` | **Active — rotation deliverable** |
 
-The model uses the **TabICLv2** pre-trained backbone, adapted for continuous regression targets via a dual-head output architecture. The two heads capture orthogonal information: **pseudotime measures progression** (distance from root along the main developmental axis), while **composition measures identity** (which lineage(s) a cell belongs to). On a branching trajectory, two cells equidistant from root on different branches get similar pseudotime but distinct composition vectors. Column-wise attention (stage 1) is the primary source of GRN signal — it learns gene-gene regulatory dependencies as a byproduct of both prediction tasks, without requiring a prior adjacency matrix.
+The model uses the **TabICLv2** pre-trained backbone, adapted for continuous regression targets via a dual-head output architecture. The two heads capture orthogonal information: **pseudotime measures progression** (distance from root along the main developmental axis), while **composition measures identity** (which lineage(s) a cell belongs to). On a branching trajectory, two cells equidistant from root on different branches get similar pseudotime but distinct composition vectors.
+
+**The rotation-scope deliverable is developmental coordinate prediction.** A biologist provides unannotated scRNA-seq data from the same neurectoderm organoid system. TRACE assigns each cell a pseudotime coordinate and a lineage composition vector in a single forward pass, without requiring manual annotation or re-clustering. Column-wise attention (stage 1) encodes gene co-expression structure as a byproduct of both prediction tasks — this is the foundation for future GRN inference work, but GRN extraction is explicitly out of scope for the July 2026 rotation report.
 
 ### 1.2 Core Design Principles
 
 - **Explicit over implicit.** Every hyperparameter lives in `ExperimentConfig`. No magic numbers in implementation code.
-- **Schema contracts at construction.** `ProcessedDataset` validates its own schema at build time. Failures surface immediately, not mid-training. Currently evolving from `prep.py` extraction functions into a full dataclass wrapper.
-- **Dual-head from start.** Both heads are active during rotation-scope training. No phase gate — the composition head is not deferred.
-- **Tests as first-class artifacts.** RED phase tests are written before implementation. The WLS perturbation integration test is the only test with a wet-lab validated expected answer.
-- **Hardware-tier portability.** Three named hardware tiers (`debug`, `standard`, `full`) ensure reproducibility across laptop, V100, and A100 without code changes.
+- **Schema contracts at construction.** `ProcessedDataset` validates its own schema at build time. Failures surface immediately, not mid-training.
+- **Dual-head from start.** Both heads are active during training from step one. No phase gate.
+- **Tests as first-class artifacts.** RED phase tests written before implementation. All 405 tests pass as of v1.9.0.
+- **Hardware-tier portability.** Three named hardware tiers (`debug`, `standard`, `full`) ensure reproducibility across laptop and A100 without code changes.
 
 ### 1.3 Scientific Context
 
 The model operates on the Matrigel-only condition of the Jain et al. 2025 time-course, which tracks brain organoid development across six collection days: 5, 7, 11, 16, 21, 30 (~41,000 cells). The trajectory branches after day 11 into telencephalic vs. non-telencephalic lineages.
 
-**Pseudotime** is recomputed via diffusion map on the full trajectory (days 5–30), replacing the published DC1 which only covers days 5–11 neuroectodermal cells. Expression matrices from different batches (sampling data) were integrated with the Cluster Similarity Spectrum (CSS)  technique outlined by the Treutlein Lab. Diffusion pseudotime was then computed over the full trajectory excluding the unknown proliferating cell population (post-hoc labelled). Day 11 cell target labels (pseudotime and hard classification labels) are withheld from model training/context — they represent the neuroectoderm-to-neuroepithelial transition, the hardest interpolation point.
+**Pseudotime** is recomputed via diffusion map on the full trajectory (days 5–30), replacing the published DC1 which only covers days 5–11 neuroectodermal cells. Expression matrices from different batches were integrated with the Cluster Similarity Spectrum (CSS) technique outlined by the Treutlein Lab. Day 11 cell labels (pseudotime and hard classification labels) are withheld from model training and context — they represent the neuroectoderm-to-neuroepithelial transition, the hardest interpolation point.
 
-D5  n= 5481  min=0.0000  p10=0.0179  median=0.1167  p90=0.2544  max=0.4087
-D7  n= 8183  min=0.0004  p10=0.0635  median=0.2534  p90=0.4193  max=0.5206
-D11  n= 4912  min=0.0083  p10=0.1649  median=0.3112  p90=0.4355  max=0.9109
-D16  n= 6571  min=0.0588  p10=0.5106  median=0.7128  p90=0.9021  max=0.9878
-D21  n= 7962  min=0.1546  p10=0.4885  median=0.7837  p90=0.9275  max=0.9987
-D30  n= 7950  min=0.2367  p10=0.5061  median=0.6526  p90=0.9791  max=1.0000
+```
+D5   n= 5481  median pseudotime=0.1167
+D7   n= 8183  median pseudotime=0.2534
+D11  n= 4912  median pseudotime=0.3112  ← withheld test set
+D16  n= 6571  median pseudotime=0.7128
+D21  n= 7962  median pseudotime=0.7837
+D30  n= 7950  median pseudotime=0.6526
+```
 
-**Perturbation validation** uses WLS and GLI3 as primary biological targets. WLS-KO (day 55) and GLI3-KO (day 45) datasets from Fleck et al. are **external GRN validation tools, not model inputs** — both are far outside the training distribution (days 5–30). Paired WT controls at the same timepoints enable WT vs. KO gene expression comparison to validate the attention-derived GRN. In-silico perturbation (zeroing target gene expression in training-distribution cells) tests whether the model's learned GRN captures regulatory relationships consistent with the real knockout biology. WLS knockout should primarily produce a **composition shift** away from non-telencephalic states.
+**Known limitation — Prosencephalic progenitors:** D11 Prosencephalic cells (n=207, ~4.2% of D11) sit at pt~0.47 but the bulk of training Prosencephalic cells live at D16/D21 (pt 0.71–0.78). The transcriptional profile at pt~0.47 overlaps with Neurectoderm/Late Neurectoderm territory, causing the model to systematically under-predict Prosencephalic affinity (W-dist ~4.8 vs baseline 4.54) regardless of anchor sampling strategy. This is a dataset limitation, not an architecture limitation, and is documented as a known caveat in the rotation report.
 
 ---
 
@@ -133,135 +95,84 @@ D30  n= 7950  min=0.2367  p10=0.5061  median=0.6526  p90=0.9791  max=1.0000
 ```
 TRACE/
 ├── pyproject.toml                      # Package registration — pip install -e .
-├── myriad_trace.sh                    # SLURM job script — rotation_finetune on Myriad GPU
+├── myriad_trace.sh                     # SGE job script — full Myriad GPU run
+├── myriad_inference.sh                 # SGE job script — inference only
 ├── LICENSE
 ├── README.md
+├── technical_design.md
 │
 ├── experiments/                        # Auto-created at runtime
 │   └── {run_id}/
 │       ├── config.json                 # Serialised ExperimentConfig (every run)
-│       ├── metrics.json                # MAE · attention_entropy · top20_bio_overlap [planned]
-│       ├── shap_background.npy         # Locked SHAP background (created once, frozen) [planned]
 │       └── checkpoints/
-│           ├── step_NNNNNN.pt          # Checkpoint every EVAL_EVERY steps (model + optimizer + loss_fn)
+│           ├── gene_coexpression.pt    # Saved at warmup boundary — col/row attention only
+│           ├── final.pt                # Saved after all N_STEPS — inference checkpoint
 │           └── loss_curve.png          # 3-panel loss curve: total / pseudotime / composition
 │
 ├── data/
-│   ├── EDA/                            # Lancaster time-series bulk RNA-seq
-│   │   ├── Original_TPM_data.csv
-│   │   └── processed/
-│   │       └── processed_tpm.csv
 │   ├── TabICLv2_checkpoint/
 │   │   └── tabicl-regressor-v2-20260212.ckpt   # Pretrained backbone
 │   ├── training_data/
 │   │   └── AnnData/
-│   │       └── neurectoderm_complete.h5ad       # Jain et al. 2025 (Matrigel condition)
-│   ├── WLS_ko_validation/
-│   │   └── AnnData/
-│   │       └── WLS_ko.h5ad                      # External validation — Jain et al. 2025
-│   └── GLI3_ko_validation/
-│       └── AnnData/
-│           └── GLI3_ko.h5ad                     # External validation — He et al. 2022
+│   │       └── neurectoderm_with_pseudotime.h5ad  # Jain et al. 2025 (Matrigel condition)
+│   ├── HPC run logs/                   # Archived Myriad run stdout/stderr
+│   └── WLS_ko_validation/             # External GRN validation — future direction
 │
 ├── path/
 │   └── spatialmt/                      # Installable package root (pip install -e .)
-│       │
-│       ├── __init__.py
-│       │
 │       ├── config/                     # ✓ Implemented
-│       │   ├── __init__.py             # Re-exports: Dirs, Paths, PROJECT_ROOT
-│       │   ├── paths.py                # Filesystem path resolution (env var + sentinel walk)
-│       │   └── experiment.py           # ExperimentConfig + all sub-configs + HARDWARE_TIERS
+│       │   ├── paths.py                # Filesystem path resolution
+│       │   └── experiment.py           # ExperimentConfig + sub-configs + HARDWARE_TIERS
 │       │
 │       ├── data_preparation/           # ✓ Implemented
-│       │   ├── __init__.py
-│       │   ├── prep.py                 # HVG selection, expression extraction, PreparedData
-│       │   ├── diffusion_trajectory.py # CSS integration, diffusion pseudotime, merge_and_save
+│       │   ├── prep.py                 # HVG selection, expression extraction
+│       │   ├── diffusion_trajectory.py # CSS integration, diffusion pseudotime
 │       │   └── dataset.py              # ProcessedDataset — from_anndata, soft labels, validation
 │       │
 │       ├── context/                    # ✓ Implemented
-│       │   ├── __init__.py
-│       │   ├── sampler.py              # ContextSampler — day-stratified anchor sampling
+│       │   ├── sampler.py              # ContextSampler — day/pseudotime/composition anchor sampling
 │       │   ├── builder.py              # CellTableBuilder + CellTable + TrainingTargets
 │       │   └── collate.py              # ICLBatch + icl_collate — DataLoader collate fn
 │       │
 │       ├── model/                      # ✓ Implemented
-│       │   ├── __init__.py
-│       │   ├── trace.py               # TabICLRegressor + AnchorLabelEmbedder + SharedTrunk
-│       │   │                           # + PseudotimeHead + CompositionHead + AttentionScorer
-│       │   ├── loss.py                 # DualHeadLoss — Kendall uncertainty weighting
-│       │   └── baselines/              # [planned]
-│       │       ├── __init__.py
-│       │       ├── protocol.py         # BaselineModel Protocol
-│       │       ├── mean_baseline.py    # Mean predictor — variance floor
-│       │       ├── ridge_baseline.py   # Ridge on PCs — linearity test
-│       │       ├── xgboost_baseline.py # XGBoost regressor — primary competitor
-│       │       ├── tabpfn_baseline.py  # TabPFN v2 performance ceiling [Phase 6]
-│       │       ├── no_icl_baseline.py  # Single-cell, no context [Phase 6]
-│       │       └── scratch_baseline.py # TabICLv2 architecture, no pretrain [Phase 6]
+│       │   ├── trace.py                # TabICLRegressor + AnchorLabelEmbedder + SharedTrunk
+│       │   │                           # + PseudotimeHead + CompositionHead + DirichletCompositionHead
+│       │   └── loss.py                 # DualHeadLoss + DirichletDualHeadLoss
 │       │
 │       ├── training/                   # ✓ Implemented
-│       │   ├── __init__.py
-│       │   ├── trainer.py              # Trainer + MuonAdamW — step-budget loop, warmup, loss_history
-│       │   ├── callbacks.py            # CheckpointCallback — saves model/optimizer/loss_fn/step
+│       │   ├── trainer.py              # Trainer + SupervisedTrainer + MuonAdamW
+│       │   ├── callbacks.py            # CheckpointCallback
 │       │   └── muon.py                 # Muon optimizer (Newton-Schulz spectral orthogonalisation)
 │       │
-│       ├── explainability/             # [planned]
-│       │   ├── __init__.py
-│       │   ├── protocols.py            # GeneScorer protocol + GeneScoreMap type alias
-│       │   ├── scorers.py              # AttentionScorer (online) + SHAPScorer (offline)
-│       │   ├── report.py               # ExplainabilityReport + disagreement taxonomy
-│       │   └── perturbation.py         # PerturbationEngine — in-silico knockouts
-│       │
-│       └── evaluation/                 # [planned]
-│           ├── __init__.py
-│           ├── metrics.py              # mae_day11, attention_entropy, top20_bio_overlap
-│           ├── benchmark.py            # Five-model benchmark suite
-│           └── external.py             # Fleck et al. 2022 zero-shot evaluation [Phase 7]
+│       └── eval/
+│           └── metrics.py              # spearman_r, mae, per_day_spearman, wasserstein_1,
+│                                       # wasserstein_baseline, brier_score, jsd
 │
 ├── src/
-│   ├── EDA_plotting/
-│   │   ├── PCA.py
-│   │   ├── temporal_heatmap.py
-│   │   └── temporal_lineplot.py
-│   ├── data_prep/
-│   │   ├── data_prep.py
-│   │   └── PCA_exploration.py
-│   ├── figures/
-│   │   ├── batch_qc.py
-│   │   ├── cell_identity_proba.py
-│   │   └── pseudotime_regression.py
 │   └── train/
-│       ├── trace_debug_run.py         # Local debug run — rotation_finetune on MPS/CPU, 500 steps
-│       ├── trace_myriad_run.py        # Full Myriad run — 10,000 steps, checkpointing, loss curve
-│       ├── XGB_classifier_run.py       # Baseline — XGBClassifier (cell identity)
-│       ├── XGB_regressor_run.py        # Baseline — XGBRegressor (pseudotime)
-│       ├── linear_regressor_run.py     # Baseline — linear regression
-│       └── nearest_centroid_run.py     # Baseline — NearestCentroid classifier
+│       ├── trace_debug_run.py          # Local debug run — 1000 steps, MPS/CPU, sampler ablation
+│       └── trace_myriad_run.py         # Full Myriad run — 25,000 steps, checkpointing, loss curve
 │
 └── tests/
     ├── conftest.py                     # Fixtures: debug_config, synthetic_dataset,
-    │                                   # synthetic_dataset_with_labels
+    │                                   #           synthetic_dataset_with_labels
     ├── unit/
-    │   ├── test_experiment_config.py   # ExperimentConfig — serialisation, hash, presets (32 tests) ✓
-    │   ├── test_dataset.py             # ProcessedDataset schema contract (26 tests) ✓
-    │   ├── test_trace_model.py        # TabICLRegressor + sub-modules (53 tests) ✓
-    │   ├── test_dual_head_loss.py      # DualHeadLoss — Kendall weighting, KL divergence (26 tests) ✓
-    │   ├── test_context_sampler.py     # ContextSampler — bin assignment, sparse bin warning (22 tests) ✓
-    │   ├── test_cell_table_builder.py  # CellTableBuilder + CellTable + TrainingTargets (27 tests) ✓
-    │   ├── test_icl_collate.py         # ICLBatch + icl_collate — shapes, ragged guard (28 tests) ✓
-    │   ├── test_trainer.py             # Trainer + MuonAdamW — fit(), warmup, loss_history (65 tests) ✓
-    │   ├── test_callbacks.py           # CheckpointCallback — file creation, contents, restore (19 tests) ✓
-    │   └── test_shap_scorer.py         # Locked background, correlated-feature sign stability [planned]
-    ├── smoke/                          # [planned]
-    │   └── test_toy_forward_pass.py    # Layer 2: toy model, shapes, no NaN, (0,1) range
-    ├── integration/
-    │   ├── test_dataset.py             # from_anndata integration tests (18 tests) ✓
-    │   ├── test_prep.py                # prep.py HVG, pseudotime, prepare_dataset tests ✓
-    │   ├── test_hold_out_split.py      # Zero intersection, day 11 only in test set [planned]
-    │   └── test_wls_perturbation.py    # Two-signal WLS test (skips without checkpoint) [planned]
-    └── biological_sanity/              # [planned]
-        └── test_sox2_attention.py      # Layer 3: SOX2 in top-20 (manual, post-training)
+    │   ├── test_experiment_config.py   # ExperimentConfig — serialisation, hash, presets ✓
+    │   ├── test_dataset.py             # ProcessedDataset schema contract ✓
+    │   ├── test_trace_model.py         # TabICLRegressor + sub-modules ✓
+    │   ├── test_dual_head_loss.py      # DualHeadLoss — Kendall weighting, KL divergence ✓
+    │   ├── test_dirichlet_loss.py      # DirichletDualHeadLoss ✓
+    │   ├── test_dirichlet_composition_head.py  # DirichletCompositionHead ✓
+    │   ├── test_context_sampler.py     # ContextSampler — day/pt/comp sampling ✓
+    │   ├── test_cell_table_builder.py  # CellTableBuilder ✓
+    │   ├── test_icl_collate.py         # ICLBatch + icl_collate ✓
+    │   ├── test_trainer.py             # Trainer + MuonAdamW ✓
+    │   ├── test_supervised_trainer.py  # SupervisedTrainer ✓
+    │   ├── test_callbacks.py           # CheckpointCallback ✓
+    │   └── test_wasserstein.py         # Wasserstein distance metric ✓
+    └── integration/
+        ├── test_dataset.py             # ProcessedDataset.from_anndata ✓
+        └── test_prep.py                # prep.py HVG, pseudotime pipeline ✓
 ```
 
 ---
@@ -277,25 +188,20 @@ TRACE/
 
 | Sub-config | Key fields | Notes |
 |---|---|---|
-| `DataConfig` | `max_genes`, `test_timepoint=11`, `hardware_tier`, `n_cell_states=8`, `label_softening_temperature=1.0` | `log1p_transform` is validated as `True` at construction; raises if `False` |
-| `ContextConfig` | `n_bins=6`, `cells_per_bin=5`, `max_context_cells=50`, `allow_replacement=True` | Validates `n_bins × cells_per_bin ≤ max_context_cells`; bin 2 (day 11) withheld |
-| `ModelConfig` | `lr_col=1e-6`, `lr_row=1e-4`, `lr_icl=5e-5`, `lr_emb=1e-3`, `lr_head=1e-3`, `warmup_col_steps=500`, `warmup_icl_steps=100`, `output_head_init_bias=0.5`, `output_head_init_std=0.01`, `composition_loss_type="kl"` | `lr_emb` is for column embeddings (always re-initialised); `composition_loss_type` switches `TabICLRegressor` between `CompositionHead` (`"kl"`) and `DirichletCompositionHead` (`"dirichlet"`); `bio_plausibility_passed` populated post-training |
-| `ExplainabilityConfig` | `shap_background_size=100`, `shap_background_seed=42`, `bio_plausibility_required=("SOX2",)`, `ih_n_steps=50`, `ih_baseline_strategy="day5_mean"`, `ih_top_k_edges=500` | SOX2 absence in top-20 triggers fallback strategy; IH fields configure Integrated Hessians |
-| `AblationTarget` | `gene`, `zero_in_query=True`, `zero_in_context_states=None`, `zero_in_context_pseudotime_below=None`, `zero_in_context_pseudotime_above=None` | Composable per-gene ablation spec; supports query-only, population-wide, state-specific, and temporal-window variants |
-| `PerturbationConfig` | `ablations=[AblationTarget(gene="WLS")]`, `pseudotime_delta_threshold=-0.05`, `attention_drop_fraction=0.1`, `composition_shift_threshold=0.05` | Default: single cell-autonomous WLS ablation; composition shift is primary signal |
-| `BenchmarkConfig` | `baselines=["mean","ridge_pca","xgboost_regressor","tabicl_finetune"]` (rotation) | Dual-axis justification: prediction accuracy + GRN explainability |
+| `DataConfig` | `max_genes`, `test_timepoint=11`, `hardware_tier`, `n_cell_states=8`, `label_softening_temperature=1.0` | `log1p_transform` validated `True` at construction |
+| `ContextConfig` | `cells_per_bin=5`, `max_context_cells=50`, `allow_replacement=True`, `n_composition_anchors=0`, `n_pseudotime_anchors=0`, `n_pseudotime_bins=5` | Validates `5 × cells_per_bin + n_pseudotime_anchors + n_composition_anchors ≤ max_context_cells`; the 5 is hardcoded — the dataset always has 5 active collection days after D11 exclusion; `n_bins` config field has been removed entirely (it was dead — the sampler always bins by actual dataset days) |
+| `ModelConfig` | `lr_col=1e-6`, `lr_row=1e-4`, `lr_icl=5e-5`, `lr_emb=1e-3`, `lr_head=1e-3`, `warmup_col_steps=500`, `warmup_icl_steps=100`, `output_head_init_bias=0.5`, `output_head_init_std=0.01`, `composition_loss_type="kl"`, `supervised_batch_size=64` | `composition_loss_type` switches `TabICLRegressor` between `CompositionHead` (`"kl"`) and `DirichletCompositionHead` (`"dirichlet"`); `bio_plausibility_passed` populated post-training |
 
 **Named presets:**
 
 ```python
-ExperimentConfig.debug_preset()                    # 256 genes, debug tier, Dirichlet NLL
-ExperimentConfig.rotation_finetune()               # 512 genes, standard tier, KL composition head (rotation_001)
-ExperimentConfig.rotation_finetune_dirichlet()     # 512 genes, standard tier, Dirichlet NLL head (rotation_002)
-ExperimentConfig.rotation_baselines()              # Baseline ladder: mean, ridge, xgboost regressor
-ExperimentConfig.full_finetune()                   # 1024 genes, 10 bins × 10 cells, full tier
-ExperimentConfig.scratch_preset()                  # No pretrained weights [Phase 6]
-ExperimentConfig.no_icl_preset()                   # Single cell input [Phase 6]
+ExperimentConfig.debug_preset()                  # 256 genes, 5 days × 5 cells, debug tier
+ExperimentConfig.rotation_finetune_dirichlet()   # 512 genes, standard tier, Dirichlet NLL (rotation_002)
+ExperimentConfig.full_finetune()                 # 2000 genes, 5 days × 10 cells, full tier, KL
+ExperimentConfig.full_finetune_dirichlet()       # 2000 genes, 5 days × 10 cells, full tier, Dirichlet NLL
 ```
+
+**`config_hash`:** SHA-256 of serialised hyperparameters excluding `run_id`. Two runs with identical hyperparameters but different `run_id` values produce the same hash.
 
 **Dependencies:** `spatialmt.config.paths.Paths`, `dataclasses`, `json`, `hashlib`
 
@@ -304,103 +210,73 @@ ExperimentConfig.no_icl_preset()                   # Single cell input [Phase 6]
 ### 3.2 `ProcessedDataset`
 **File:** `path/spatialmt/data_preparation/dataset.py`
 
-**Purpose:** Immutable, schema-validated container for one experiment's training data. Wraps the output of `data_preparation/prep.py` extraction functions with schema validation, soft label computation, and manifest hashing. Every downstream component receives this object; raw files are never accessed after construction.
+**Purpose:** Immutable, schema-validated container for one experiment's training data. Every downstream component receives this object; raw files are never accessed after construction.
 
 **Fields:**
 
 | Field | Shape | Type | Notes |
 |---|---|---|---|
-| `expression` | `(n_cells, n_genes)` | `np.float32` | log-normalised (CP10k+log1p from Zenodo), validated max < 20.0 |
+| `expression` | `(n_cells, n_genes)` | `np.float32` | log-normalised (CP10k+log1p), validated max < 20.0 |
 | `gene_names` | `(n_genes,)` | `list[str]` | HVG names in column order (flavor=`seurat`) |
-| `pseudotime` | `(n_cells,)` | `np.float32` | Diffusion pseudotime ∈ [0, 1] — recomputed via CSS + DPT on full trajectory (days 5–30); loaded from `adata.obs["rank-transformed-pseudotime"]` |
+| `pseudotime` | `(n_cells,)` | `np.float32` | Diffusion pseudotime ∈ [0, 1]; loaded from `adata.obs["rank-transformed-pseudotime"]` |
 | `collection_day` | `(n_cells,)` | `np.int32` | ∈ {5, 7, 11, 16, 21, 30} |
 | `cell_ids` | `(n_cells,)` | `list[str]` | Unique identifiers |
 | `cell_type_labels` | `(n_cells,)` | `pd.Series` | `class3` annotations — 8 states |
-| `orig_ident` | `(n_cells,)` | `pd.Series` | Timepoint strings (`HB4_D5`, etc.) |
 | `soft_labels` | `(n_cells, K)` | `np.float32` | Distance-to-centroid softmax, K=8 |
+| `centroid_distances` | `(K, K)` | `np.float64` | PCA-space inter-centroid distances — ground metric for Wasserstein evaluation |
 | `manifest_hash` | scalar | `str` | SHA-256 of `sorted(gene_names)` |
 
-**No train/val/test split in ProcessedDataset.** Split logic lives downstream:
-- Baselines: `X_train = X[collection_day != 11]`, standard sklearn fit/predict
-- TabICL: `ContextSampler` excludes day 11 from context bins; day 11 cells are query-only
-- Both paradigms share the hold-out definition: **day 11 cells are never used for learning**
-
-**Key methods:**
-
-```python
-ProcessedDataset.from_anndata(h5ad_path, config)  # Primary constructor — fully implemented
-ProcessedDataset._validate(instance)               # Schema assertion — called inside constructor
-ProcessedDataset._compute_soft_labels()            # Distance-to-centroid softmax, K=8
-ProcessedDataset._compute_manifest_hash()          # SHA-256 of sorted gene names
-ProcessedDataset.save(path) / .load(path)          # Atomic write with manifest (planned)
-```
-
 **Validation assertions (all checked at construction):**
-- `expression.max() < 20.0` — guards against raw counts
+- `expression.max() < 20.0`
 - `pseudotime ∈ [0, 1]`
 - No NaN or Inf in expression or pseudotime
 - `soft_labels.sum(axis=1) ≈ 1.0` ± 1e-5
-- `X.shape[0] == len(cell_ids) == len(cell_type_labels) == len(pseudotime)`
-- `X.shape[1] == len(gene_names)`
-
-**Auto-normalisation:** `from_anndata` auto-applies `normalize_total(target_sum=1e4)` + `log1p` if `adata.X.max() >= 20.0`. The `seurat` HVG flavor is always used; raw-count detection relies on the expression max threshold.
-
-**Memory optimisation:** Densification deferred until after HVG selection. Peak: ~314 MB (41k × 2k × float32) instead of ~3.8 GB (41k × 24k × float32).
-
-**Dependencies:** `numpy`, `pandas`, `scanpy`, `sklearn.decomposition.PCA`, `spatialmt.config.experiment.DataConfig`, `spatialmt.data_preparation.prep`
+- Shape consistency across all arrays
 
 ---
 
 ### 3.3 `ContextSampler`
 **File:** `path/spatialmt/context/sampler.py` ✓ Implemented
 
-**Purpose:** Samples anchor cells for the ICL context window using day-stratified bin sampling. Groups cells by `collection_day`, excludes the withheld test day (11), and samples `cells_per_bin` anchors from each active day-bin per query.
+**Purpose:** Samples anchor cells for the ICL context window. Supports three independent anchor-selection strategies that can be combined in any proportion. Day-11 cells are excluded from all anchor pools.
 
-**Bin layout:**
+**Three components:**
 
-| Bin | Collection day | Status |
+| Component | Config field | Mechanism |
 |---|---|---|
-| 0 | Day 5 | Context |
-| 1 | Day 7 | Context |
-| — | Day 11 | **Test — excluded from sampling** |
-| 2 | Day 16 | Context |
-| 3 | Day 21 | Context |
-| 4 | Day 30 | Context |
+| Day-stratified | `cells_per_bin` | `cells_per_bin` anchors drawn from each active collection day (D5, D7, D16, D21, D30). 5 active days at runtime after D11 exclusion. |
+| Pseudotime-stratified | `n_pseudotime_anchors` | Anchors distributed across `n_pseudotime_bins` equal-width bins over [0, 1]. Covers developmental progression independent of collection day. |
+| Composition-stratified | `n_composition_anchors` | Anchors distributed evenly across dominant-class pools (argmax of `soft_labels`). Ensures each cell-type archetype is represented in every context window. |
 
-Day-based grouping is used directly (5 active bins at runtime). `bin_edges` is accepted as an optional constructor argument and stored for future pseudotime-only binning mode.
+**Active components:** Any combination is valid. A component is inactive when its count is 0. The `debug_preset` uses day-stratified only by default; individual sampler modes are selected via the `SAMPLER` env var in `trace_debug_run.py`.
 
-**Sparse bin guard:** When a bin contains fewer eligible cells than `cells_per_bin`, sampling proceeds with replacement and a `UserWarning` is raised. Setting `allow_replacement=False` raises `ValueError` instead.
+**Pre-built index structures (constructor):**
+- `_day_to_indices`: `dict[int, list[int]]` — per collection day (D11 excluded)
+- `_pt_bin_to_indices`: `dict[int, list[int]]` — equal-width pseudotime bins; `np.searchsorted` assignment; pt=1.0 clamped to last bin
+- `_class_to_indices`: `dict[int, list[int]]` — dominant class = `soft_labels.argmax(axis=1)`
 
-**Constructor:**
-```python
-ContextSampler(dataset: ProcessedDataset, config: ContextConfig, bin_edges=None)
-```
+**Sparse bin guard:** When a bin contains fewer eligible cells than requested, sampling proceeds with replacement and a `UserWarning` is raised. `allow_replacement=False` raises `ValueError` instead.
 
 **Primary method:**
 ```python
 sampler.sample(query_cell_id: str, rng: Generator | int | None = None)
     -> (anchor_cell_ids: list[str], anchor_pseudotimes: np.ndarray[float32])
 ```
-The query cell is excluded from its own context window. `rng` accepts a `np.random.Generator`, an `int` seed, or `None` (fresh unseeded generator).
-
-**Dependencies:** `numpy`, `spatialmt.config.experiment.ContextConfig`, `spatialmt.data_preparation.dataset.ProcessedDataset`
 
 ---
 
 ### 3.4 `CellTableBuilder`, `CellTable`, `TrainingTargets`
 **File:** `path/spatialmt/context/builder.py` ✓ Implemented
 
-**Purpose:** Assembles model inputs and training targets for a single ICL training step. Enforces the model/loss boundary — query labels are never placed in `CellTable`; they are held separately in `TrainingTargets` and only touched by the loss function.
-
-**Dataclasses:**
+**Purpose:** Assembles model inputs and training targets for a single ICL training step. Query labels are never placed in `CellTable`; they are held separately in `TrainingTargets`.
 
 ```python
 @dataclass
 class CellTable:
-    context_expression:  np.ndarray  # (n_anchors, n_genes) float32 — model input
-    context_pseudotime:  np.ndarray  # (n_anchors,)         float32 — model input
-    context_soft_labels: np.ndarray  # (n_anchors, K)       float32 — model input
-    query_expression:    np.ndarray  # (n_genes,)           float32 — model input
+    context_expression:  np.ndarray  # (n_anchors, n_genes) float32
+    context_pseudotime:  np.ndarray  # (n_anchors,)         float32
+    context_soft_labels: np.ndarray  # (n_anchors, K)       float32
+    query_expression:    np.ndarray  # (n_genes,)           float32
 
 @dataclass
 class TrainingTargets:
@@ -408,25 +284,10 @@ class TrainingTargets:
     query_soft_labels: np.ndarray    # (K,) float32   — loss only
 ```
 
-**Constructor:** `CellTableBuilder(dataset: ProcessedDataset)` — builds an O(1) `cell_id → row_index` lookup once; reused across all `build()` calls.
-
-**Primary method:**
-```python
-builder.build(
-    query_cell_id: str,
-    anchor_ids: list[str],          # from ContextSampler.sample(); duplicates allowed
-) -> tuple[CellTable, TrainingTargets]
-```
-Raises `KeyError` if any id is not in the dataset.
-
-**Dependencies:** `numpy`, `dataclasses`, `spatialmt.data_preparation.dataset.ProcessedDataset`
-
 ---
 
 ### 3.4b `ICLBatch` and `icl_collate`
 **File:** `path/spatialmt/context/collate.py` ✓ Implemented
-
-**Purpose:** DataLoader collate function. Stacks a list of `(CellTable, TrainingTargets)` pairs into a single `ICLBatch` of torch.Tensors. All fields are `float32` on CPU; device transfer is handled by the training loop.
 
 ```python
 @dataclass
@@ -437,383 +298,129 @@ class ICLBatch:
     query_expression:    torch.Tensor  # (B, n_genes)
     query_pseudotime:    torch.Tensor  # (B,)
     query_soft_labels:   torch.Tensor  # (B, K)
-
-def icl_collate(batch: list[tuple[CellTable, TrainingTargets]]) -> ICLBatch
 ```
 
-**Ragged guard:** Raises `ValueError` if any item has a different `n_anchors` than item 0 — ragged context windows are not supported.
-
-**Dependencies:** `numpy`, `torch`, `spatialmt.context.builder.CellTable`, `spatialmt.context.builder.TrainingTargets`
+**Ragged guard:** Raises `ValueError` if any item has a different `n_anchors` than item 0.
 
 ---
 
 ### 3.5 `TabICLRegressor`
 **File:** `path/spatialmt/model/trace.py` ✓ Implemented
 
-**Purpose:** TabICLv2 backbone adapted for dual-head pseudotime regression and cell state composition. Manages differential learning rates and staged warmup.
-
 **Forward pass (five stages):**
 
-| Stage | Module | Input → Output | LR | Warmup | Biological role |
-|---|---|---|---|---|---|
-| 1 — Column | `col_embedder` (`ColEmbedding`) | `(B, n_cells, n_genes)` → `(B, n_cells, seq_len, embed_dim)` | 1e-6 | 500 steps | GRN signal — `AttentionScorer` hooks here |
-| 2 — Row | `row_interactor` (`RowInteraction`) | `(B, n_cells, seq_len, embed_dim)` → `(B, n_cells, d_model)` | 1e-4 | None | Aggregates gene context into cell vector |
-| 3 — Label inject | `anchor_label_embedder` (`AnchorLabelEmbedder`) | `(B, n_cells, d_model)` + pseudotime/soft_labels → same | 1e-3 | None | Injects anchor targets into row representations (ICL protocol) |
-| 4 — ICL | `tf_icl` (`tabicl.model.encoders.Encoder`, pretrained) | `(B, n_cells, d_model)` → same; query attends anchors only | 5e-5 | 100 steps | Predicts query relative to anchor context |
-| 5 — Heads | `shared_trunk` → `pseudotime_head` + `composition_head` | `(B, d_model)` → `(B,)` + `(B, K)` | 1e-3 | None | Dual-head output |
-
-`d_model = num_cls × embed_dim` (RowInteraction CLS token output dimension).
-
-**`parameter_groups()` returns four groups:**
-```python
-[
-    {"name": "col",  "params": list(self.col_embedder.parameters()),         "lr": cfg.lr_col},   # 1e-6
-    {"name": "row",  "params": list(self.row_interactor.parameters()),        "lr": cfg.lr_row},   # 1e-4
-    {"name": "icl",  "params": list(self.tf_icl.parameters()),                "lr": cfg.lr_icl},   # 5e-5
-    {"name": "head", "params": (
-        list(self.anchor_label_embedder.parameters())
-        + list(self.shared_trunk.parameters())
-        + list(self.pseudotime_head.parameters())
-        + list(self.composition_head.parameters())
-    ),                                                                         "lr": cfg.lr_head},  # 1e-3
-]
-```
+| Stage | Module | LR | Warmup | Role |
+|---|---|---|---|---|
+| 1 — Column | `col_embedder` | 1e-6 | 500 steps | Gene co-expression encoding |
+| 2 — Row | `row_interactor` | 1e-4 | None | Cell vector aggregation |
+| 3 — Label inject | `anchor_label_embedder` | 1e-3 | None | Injects anchor targets (ICL protocol) |
+| 4 — ICL | `tf_icl` (pretrained) | 5e-5 | 100 steps | Query attends to anchor context |
+| 5 — Heads | `shared_trunk` → dual heads | 1e-3 | None | Dual-head output |
 
 **Critical implementation details:**
-- `emb.clone()` passed to `row_interactor` — `RowInteraction._train_forward` performs an in-place write to CLS token slots; the clone prevents this from severing autograd to `col_embedder`
-- `batch.context_pseudotime` always passed as `y_train` to `col_embedder`, even though `target_aware=False` — `ColEmbedding` reads `y_train.shape[1]` unconditionally for ISAB masking
-- `tf_icl` loaded via `load_backbone(checkpoint_path)` with key remapping: `icl_predictor.tf_icl.*` → `tf_icl.*`; `col_embedder.*` keys are **always excluded** — pretrained column embeddings are position-indexed (feature order in the pretraining tabular task), not gene-name-indexed; they are reinitialised fresh for every TRACE run
-- Warmup/freeze scheduling (col: 500 steps, icl: 100 steps) implemented in `Trainer._apply_warmup_freeze()` — applied at the start of every step
-
-**Dependencies:** `torch`, `torch.nn`, `tabicl.model.embedding.ColEmbedding`, `tabicl.model.interaction.RowInteraction`, `tabicl.model.encoders.Encoder`, `spatialmt.config.experiment.ModelConfig`
+- `emb.clone()` passed to `row_interactor` — prevents in-place CLS write severing autograd to `col_embedder`
+- `col_embedder.*` always excluded from `load_backbone()` — pretrained weights are position-indexed, not gene-name-indexed
+- `DirichletCompositionHead.forward` clamps softplus input to max=80.0 — prevents float32 overflow producing `inf` alpha values (fix: commit `041f20f`)
 
 ---
 
 ### 3.6 `PseudotimeHead`
 **File:** `path/spatialmt/model/trace.py` ✓ Implemented
 
-**Purpose:** Regression head producing a scalar pseudotime prediction in `(0, 1)` from the query cell representation.
-
-**Architecture:** `Linear(d_model, 1)` → `sigmoid` → `squeeze(-1)`
-
-**Input:** `(batch, d_model)` query cell representation from ICL stage  
-**Output:** `(batch,)` predicted pseudotime ∈ `(0, 1)`
-
-**Initialisation:**
-```python
-nn.init.normal_(self.linear.weight, mean=0.0, std=0.01)   # near-zero weights
-nn.init.constant_(self.linear.bias, 0.5)                   # trajectory midpoint prior
-```
-
-**Loss:** `MSELoss(predicted_pseudotime, pseudotime_target)` — target is recomputed diffusion pseudotime (scaffold: linearly scaled collection day)
-
-**Key property:** Sigmoid guarantees output ∈ `(0, 1)` — predictions can never exceed the pseudotime range. Boundary cells at day 5 (pseudotime ≈ 0) and day 30 (pseudotime ≈ 1) cannot generate destabilising gradients from overshooting.
+**Architecture:** `Linear(d_model, 1)` → `sigmoid` → `squeeze(-1)`  
+**Output:** `(batch,)` predicted pseudotime ∈ `(0, 1)`  
+**Init:** weight std=0.01, bias=0.5 (sigmoid(0.5)≈0.62 — trajectory midpoint prior)
 
 ---
 
 ### 3.7 `CompositionHead` and `DirichletCompositionHead`
 **File:** `path/spatialmt/model/trace.py` ✓ Implemented
 
-Two composition heads are implemented. `TabICLRegressor` instantiates one based on `ModelConfig.composition_loss_type`.
-
 #### `CompositionHead` (`composition_loss_type="kl"`)
-
-**Purpose:** Softmax head producing a K-dimensional probability vector. Used in `rotation_finetune()` (`rotation_001`).
-
-**Architecture:** `Linear(d_model, K)` → `softmax(dim=-1)`
-
-**Input:** `(batch, d_model)` query cell representation (same vector as `PseudotimeHead`)  
-**Output:** `(batch, K)` soft probability vector, rows sum to 1.0 ∈ (0, 1)^K
-
-**K=8 cell state index mapping:**
-
-| Index | State | Cell count | Dominant timepoint |
-|---|---|---|---|
-| 0 | Neurectoderm | 10,001 | Day 5 |
-| 1 | Late Neurectoderm | 7,962 | Day 7–11 |
-| 2 | Unknown proliferating cells | 857 | Mixed |
-| 3 | Prosencephalic progenitors | 1,506 | Day 11 |
-| 4 | Late Prosencephalic progenitors | 4,275 | Day 11–16 |
-| 5 | Telencephalic progenitors | 9,681 | Day 16–21 |
-| 6 | Diencephalic progenitors | 4,899 | Day 16–21 |
-| 7 | Tel/Die neurons | 1,878 | Day 21–30 |
-
-**Initialisation (via `_init_linear` helper):**
-```python
-nn.init.normal_(self.linear.weight, std=0.01)
-nn.init.constant_(self.linear.bias, 0.0)   # uniform-ish softmax prior at init
-```
-
-**Loss:** KL divergence KL(target ∥ pred) via `DualHeadLoss.composition_loss` — see §3.8  
-**Target:** `soft_labels ∈ (0, 1)^K` with rows summing to 1.0 — computed by distance-to-centroid softmax from `ProcessedDataset`
+**Architecture:** `Linear(d_model, K)` → `softmax(dim=-1)`  
+**Output:** `(batch, K)` probability vector, rows sum to 1.0
 
 #### `DirichletCompositionHead` (`composition_loss_type="dirichlet"`)
+**Architecture:** `Linear(d_model, K)` → `softplus(clamp(x, max=80.0))`  
+**Output:** `(batch, K)` concentration parameters α_k > 0
 
-**Purpose:** Outputs Dirichlet concentration parameters α ∈ (0, ∞)^K rather than a probability vector. Used in `rotation_finetune_dirichlet()` (`rotation_002`). Enables per-class uncertainty quantification alongside point predictions.
-
-**Architecture:** `Linear(d_model, K)` → `softplus`
-
-**Input:** `(batch, d_model)` query cell representation  
-**Output:** `(batch, K)` concentration parameters, all > 0
-
-**Inference-time readouts (computed by caller):**
+**Inference-time readouts:**
 ```
 mean prediction  : α_k / Σα_k
-total precision  : α₀ = Σα_k        (higher = model is more confident about this cell)
+total precision  : α₀ = Σα_k
 per-class variance: α_k(α₀ − α_k) / (α₀²(α₀ + 1))
 ```
 
-**Initialisation:** same `_init_linear` as `CompositionHead` (weight std=0.01, bias=0.0).
+**K=8 cell state index mapping:**
 
-**Loss:** Dirichlet NLL via `DirichletDualHeadLoss.composition_loss` — see §3.8
+| Index | State | Dominant timepoint |
+|---|---|---|
+| 0 | Neurectoderm | Day 5 |
+| 1 | Late Neurectoderm | Day 7–11 |
+| 2 | Unknown proliferating cells | Mixed |
+| 3 | Prosencephalic progenitors | Day 11 |
+| 4 | Late Prosencephalic progenitors | Day 11–16 |
+| 5 | Telencephalic progenitors | Day 16–21 |
+| 6 | Diencephalic progenitors | Day 16–21 |
+| 7 | Tel/Die neurons | Day 21–30 |
 
 ---
 
 ### 3.8 `DualHeadLoss` and `DirichletDualHeadLoss`
 **File:** `path/spatialmt/model/loss.py` ✓ Implemented
 
-Two loss classes are implemented, paired with the two composition heads.
+#### `DualHeadLoss` (`rotation_001`)
+Kendall uncertainty weighting on both MSE and KL. Both `log_sigma_sq_pt` and `log_sigma_sq_comp` are learnable.
 
-#### `DualHeadLoss` (used with `CompositionHead`, `rotation_001`)
-
-**Purpose:** Uncertainty-weighted dual-head loss (Kendall, Gal & Cipolla, NeurIPS 2018). Both tasks use Kendall weighting with learnable log σ² parameters.
-
-**Mechanism:**
 ```python
-# Learnable log-variance parameters (nn.Parameter, 0-dim scalars)
-s_pt   = log_sigma_sq_pt    # init = 0 → σ² = 1
-s_comp = log_sigma_sq_comp  # init = 0 → σ² = 1
-
-L_pt   = MSE(pt_pred, pt_target)
-L_comp = KL(comp_target ∥ comp_pred)   # Σ_k π_k · (log π_k – log p_k)
-
-total = exp(–s_pt)  · L_pt   + ½·s_pt
-      + exp(–s_comp) · L_comp + ½·s_comp
+total = exp(–s_pt) · MSE(pt_pred, pt_target) + ½·s_pt
+      + exp(–s_comp) · KL(comp_target ∥ comp_pred) + ½·s_comp
 ```
 
-**Properties:**
-- At init (s=0): `total = L_pt + L_comp` — equal unit weighting
-- ½·s penalty prevents σ → ∞ trivially zeroing both losses
-- Both `log_sigma_sq_pt` and `log_sigma_sq_comp` must be included in the optimiser
-- Returns `(total, L_pt, L_comp)` — total for `.backward()`, components for logging
+#### `DirichletDualHeadLoss` (`rotation_002`)
+Kendall weighting on pseudotime MSE only; fixed `lambda_comp=0.1` on Dirichlet NLL.
 
-#### `DirichletDualHeadLoss` (used with `DirichletCompositionHead`, `rotation_002`)
-
-**Purpose:** Kendall uncertainty weighting on pseudotime MSE only; Dirichlet NLL for composition uses a fixed scalar weight `lambda_comp`.
-
-**Mechanism:**
 ```python
-s_pt  = log_sigma_sq_pt   # learnable nn.Parameter, init = 0
-
-L_pt   = MSE(pt_pred, pt_target)
-L_comp = -mean_B log Dir(comp_target ; concentrations)   # Dirichlet NLL
-
-total = exp(–s_pt) · L_pt + ½·s_pt + lambda_comp · L_comp
+total = exp(–s_pt) · MSE(pt_pred, pt_target) + ½·s_pt
+      + 0.1 · (−mean log Dir(comp_target ; α))
 ```
 
-**`lambda_comp = 0.1` (fixed):** Dirichlet NLL is unbounded below — as concentrations sharpen during training the log-likelihood grows without limit. Kendall's σ would chase it toward −∞ and the combined loss would diverge. A fixed weight keeps concentration magnitudes interpretable and preserves the per-class uncertainty estimates (α₀, Var(p̂_k)) used for GRN edge confidence scoring. At `lambda_comp=0.1`, raw Dirichlet NLL values of O(10–20) contribute O(1–2) to the total, comparable to the Kendall-weighted MSE term.
-
-**Only `log_sigma_sq_pt` is a learnable parameter** — there is no `log_sigma_sq_comp`. The `CheckpointCallback` saves `loss_fn.state_dict()` which captures `log_sigma_sq_pt` for resume.
-
-**Active from training start** — both heads train simultaneously from step one.
+`lambda_comp=0.1` is fixed because Dirichlet NLL is unbounded below — Kendall σ_comp would diverge as concentrations sharpen during training.
 
 ---
 
 ### 3.9 `Trainer`
 **File:** `path/spatialmt/training/trainer.py` ✓ Implemented
 
-**Purpose:** Step-budget fine-tuning loop. Each step draws a fresh stochastic `(query_cell, context_cells)` ICL pair — there is no epoch boundary or convergence criterion. The loop runs for exactly `n_steps` gradient updates; callbacks fire every `eval_every` steps.
+Step-budget fine-tuning loop. Each step draws a fresh stochastic `(query_cell, context_cells)` ICL pair. Day-11 cells excluded from query pool.
 
-**Warmup / freeze schedule** (`_apply_warmup_freeze`, called at the start of every step):
+**Warmup schedule:**
 
 | Component | Frozen while | Rationale |
 |---|---|---|
-| `col_embedder` | `global_step < warmup_col_steps` (500) | Random init would perturb the pretrained backbone before embeddings stabilise |
-| `tf_icl` | `global_step < warmup_icl_steps` (100) | Allows dual heads to establish a gradient signal before the ICL transformer unfreezes |
-| `row_interactor`, heads | Always trainable | No warmup needed |
+| `col_embedder` | `step < warmup_col_steps` (500) | Stabilise gene embeddings before perturbing pretrained backbone |
+| `tf_icl` | `step < warmup_icl_steps` (100) | Let heads establish gradient signal before ICL unfreezes |
 
-**Query pool:** Day-11 cells are excluded from the query pool at construction (`_WITHHELD_DAY = 11`). `ContextSampler` separately excludes them from anchor bins — day-11 cells are never used for learning in any role.
-
-**Optimizer:** `MuonAdamW` — see §3.10.
-
-**`fit()` return value:**
+**`fit()` return:**
 ```python
-{
-    "train_loss":   float,   # Kendall-weighted total — run average over all n_steps
-    "pt_loss":      float,   # Raw MSE component — run average
-    "comp_loss":    float,   # Raw KL divergence component — run average
-    "loss_history": list[dict],  # One entry per eval_every interval:
-                                 # {"step", "train_loss", "pt_loss", "comp_loss"}
-                                 # Each value is the mean over that interval's steps.
-                                 # Empty list if n_steps < eval_every.
-}
+{"train_loss": float, "pt_loss": float, "comp_loss": float,
+ "loss_history": list[{"step", "train_loss", "pt_loss", "comp_loss"}]}
 ```
-
-`loss_history` enables post-training convergence diagnosis without requiring TensorBoard on Myriad. `trace_myriad_run.py` reads it and saves a 3-panel PNG to the checkpoint directory.
-
-**Note — effective batch size:** `icl_collate([(table, targets)])` is called with a single pair per step — batch size is always 1. `batch_size` has been removed from `HARDWARE_TIERS` (dead config). True batching (loop B query cells, pass list to `icl_collate`) is architecturally straightforward but deferred: the CPU-side `CellTableBuilder.build()` loop is the bottleneck, not GPU utilisation.
 
 ---
 
 ### 3.10 `MuonAdamW`
-**File:** `path/spatialmt/training/trainer.py` ✓ Implemented
-
-**Purpose:** Composite optimizer routing parameters to Muon or AdamW based on tensor dimensionality.
-
-| Condition | Sub-optimizer | Rationale |
-|---|---|---|
-| `param.ndim >= 2` | Muon (Newton-Schulz spectral step) | Weight matrices — attention projections, FC weights |
-| `param.ndim < 2` | AdamW | Biases, LayerNorm scales, Kendall log σ² scalars |
-
-**Logical groups** (preserved on `MuonAdamW.param_groups` for LR inspection):
-- `col` (lr 1e-6), `row` (lr 1e-4), `icl` (lr 5e-5), `head` (lr 1e-3), `loss` (lr 1e-3 — Kendall σ² parameters)
-
-**Serialisation:** `state_dict()` / `load_state_dict()` delegate to the `_muon` and `_adamw` sub-optimizers, enabling full optimizer state persistence in `CheckpointCallback`.
+Routes `ndim ≥ 2` parameters (weight matrices) to Muon and `ndim < 2` (biases, LayerNorm, Kendall scalars) to AdamW.
 
 ---
 
 ### 3.11 `CheckpointCallback`
-**File:** `path/spatialmt/training/callbacks.py` ✓ Implemented
-
-**Purpose:** Saves a complete training snapshot every `every` steps. Fires inside `Trainer.fit()` via `on_epoch_end(model, dataset, step)`.
-
-**Saved payload** (`step_NNNNNN.pt`):
-```python
-{
-    "global_step":     int,
-    "model_state":     model.state_dict(),
-    "optimizer_state": trainer.optimizer.state_dict(),  # MuonAdamW — both sub-optimizers
-    "loss_fn_state":   loss_fn.state_dict(),            # Kendall log_sigma_sq_pt + log_sigma_sq_comp
-}
-```
-
-**Construction note:** `CheckpointCallback` requires a `Trainer` reference to access `trainer.optimizer` (assigned by `fit()` at runtime). The standard pattern uses late-wiring — construct with `trainer=None`, then assign after `Trainer` is built:
-```python
-checkpoint_cb = CheckpointCallback(trainer=None, loss_fn=loss_fn, out_dir=ckpt_dir, every=1000)
-trainer = Trainer(..., callbacks=[checkpoint_cb])
-checkpoint_cb.trainer = trainer
-```
-
-**Dependencies:** `torch`, `pathlib.Path`, `spatialmt.training.trainer.Trainer`, `spatialmt.model.loss.DualHeadLoss`
+Saves `{global_step, model_state, optimizer_state, loss_fn_state}` every `every` steps.
 
 ---
 
 ### 3.12 `SupervisedTrainer`
-**File:** `path/spatialmt/training/trainer.py` ✓ Implemented
-
-**Purpose:** Batched supervised fine-tuning alternative to `Trainer`. Processes all non-day-11 cells in mini-batches over `n_epochs` passes. `tf_icl` is permanently frozen — the ICL attention transformer does not participate in gradient updates.
-
-**Key differences from `Trainer`:**
-
-| | `Trainer` | `SupervisedTrainer` |
-|---|---|---|
-| Input | Stochastic `(query, context)` ICL pair | Mini-batch of cells, no ICL context |
-| Context | Sampled anchors from `ContextSampler` | Population-mean anchor (mean expression of all non-day-11 cells) |
-| `tf_icl` | Unfreezes after `warmup_icl_steps` | Permanently frozen |
-| Step budget | Fixed `n_steps` | `n_epochs` × (n_train_cells / batch_size) |
-| Forward path | `model.forward(ICLBatch)` | `model.forward_supervised(expr, anchor)` |
-
-**Population anchor:** The mean expression vector over all non-day-11 cells is precomputed at construction and stored as `_population_anchor`. At `fit()` start it is moved to device once. This replaces stochastic context sampling — the model sees a fixed representative background rather than a drawn anchor set.
-
-**`tf_icl` permanently frozen:** Set at construction, never re-enabled. `_make_optimizer` excludes the `"icl"` parameter group entirely.
-
-**`fit()` return value:** Same schema as `Trainer.fit()` — `{train_loss, pt_loss, comp_loss, loss_history}`.
-
-**Dependencies:** `numpy`, `torch`, `spatialmt.context.collate.ICLBatch`, `spatialmt.config.experiment.ExperimentConfig`
-
----
-
-### 3.13 `GeneScorer` Protocol
-**File:** `path/spatialmt/explainability/protocols.py`
-
-**Purpose:** Shared interface for all gene importance scoring methods. Adding a new method (e.g., Integrated Gradients) requires one new class; no changes to existing code.
-
-```python
-class GeneScorer(Protocol):
-    @property
-    def name(self) -> str: ...
-
-    def score(
-        self,
-        model: object,
-        dataset: ProcessedDataset,
-        query_cells: np.ndarray,
-    ) -> GeneScoreMap: ...          # GeneScoreMap = dict[str, float]
-
-    def top_k(self, ..., k: int = 20) -> list[str]: ...
-```
-
-**Implementors:** `AttentionScorer`, `SHAPScorer`
-
----
-
-### 3.14 `AttentionScorer`
-**File:** `path/spatialmt/explainability/scorers.py`
-
-**Purpose:** Extracts column-attention weights from stage 1 of the TabICLv2 backbone. Produces a `GeneScoreMap` where each gene's score is its mean outgoing attention weight across heads and query cells — representing how much other genes depend on it.
-
-**Execution context:** Online — runs as a training callback after each epoch.
-
-**Stage specificity guard:**
-```python
-# AssertionError raised if hook is registered on row or ICL attention layers
-assert layer_type == "column", (
-    f"AttentionScorer must target column attention only. "
-    f"Got layer_type='{layer_type}'. GRN interpretation requires stage 1."
-)
-```
-
-**Score computation:**
-```python
-# weights shape: (batch, n_heads, n_genes, n_genes)
-# Mean over batch and heads → (n_genes, n_genes)
-# Mean outgoing weight per gene → (n_genes,)
-# Assert sum ≈ 1.0 (softmax invariant)
-```
-
-**Per-epoch monitoring:** Logs Shannon entropy of scores. High entropy (model attends uniformly) signals that column attention has not learned a discriminative structure — the trigger for the biological plausibility gate.
-
----
-
-### 3.15 `SHAPScorer`
-**File:** `path/spatialmt/explainability/scorers.py`
-
-**Purpose:** KernelSHAP-based gene importance scoring. Model-agnostic — works on any baseline (XGBoost, TabPFN v2) without modification, enabling direct comparison of SHAP rankings across the benchmark suite.
-
-**Execution context:** Offline — runs post-training on the frozen model checkpoint.
-
-**Locked background:**
-- Pseudotime-stratified sample of `shap_background_size=100` cells
-- Drawn with `shap_background_seed=42`
-- Saved to `experiments/{run_id}/shap_background.npy` on first call, loaded on all subsequent calls
-- Never regenerated — ensures reproducibility across SHAP runs
-
-**Stability guarantees (tested):**
-- Top-5 SHAP genes are identical across two seeded runs with the same background
-- Correlated features (Pearson r ≈ 1.0) produce SHAP values with identical sign
-
----
-
-### 3.16 `ExplainabilityReport`
-**File:** `path/spatialmt/explainability/report.py`
-
-**Purpose:** Reconciles `AttentionScorer` and `SHAPScorer` outputs into a structured disagreement taxonomy. The taxonomy classifies every gene into one of three classes per inference call.
-
-**Disagreement taxonomy:**
-
-| Class | Condition | Biological interpretation |
-|---|---|---|
-| `CONCORDANT` | Both high or both low | Clean signal — report with confidence |
-| `ATTENTION_ONLY` | High attention, low SHAP | Spurious correlation — gene is attended to but does not drive prediction |
-| `SHAP_ONLY` | Low attention, high SHAP | **GRN relay node** — gene drives prediction via indirect regulatory path invisible to column attention |
-
-**`SHAP_ONLY` genes are the primary scientific output.** They are candidates for cross-referencing against known GRN databases (TRRUST, RegNetwork, ChEA3).
-
-**Output type:** `ExplainabilityResult` dataclass with properties:
-- `concordant_genes`, `attention_only_genes`, `shap_only_genes`
-- `attention_entropy`, `spearman_correlation`
-- `bio_plausibility_passed`, `missing_required_genes`
-- `paper_validated_in_top_attention`
+Batched supervised alternative — uses population-mean anchor, `tf_icl` permanently frozen. Used for head-only fine-tuning or debugging head initialisation independently of the ICL pathway.
 
 ---
 
@@ -821,310 +428,141 @@ assert layer_type == "column", (
 
 ### 4.1 Training Data Flow
 
-```mermaid
-sequenceDiagram
-    participant TPM as TPM Files
-    participant DS as ProcessedDataset
-    participant CS as ContextSampler
-    participant CB as CellTableBuilder
-    participant M as TabICLRegressor
-    participant PH as PseudotimeHead
-    participant CH as CompositionHead
-    participant L as NormalisedDualLoss
-    participant AS as AttentionScorer
-
-    TPM->>DS: from_anndata(h5ad_path, config)
-    Note over DS: HVG (seurat) · soft labels · validate schema
-
-    DS->>CS: ProcessedDataset
-    CS->>CB: anchor_cell_ids (5 context bins × k cells, day 11 withheld)
-    DS->>CB: ProcessedDataset
-    CB->>M: context_expr (n_context, n_genes) · context_pseudotime · query_expr
-
-    M->>M: Stage 1 — column attention (gene × gene)
-    Note over M: AttentionScorer hooks here
-    M->>AS: attention_weights (batch, n_heads, n_genes, n_genes)
-    AS-->>M: GeneScoreMap logged to epoch_scores
-
-    M->>M: Stage 2 — row attention (feature → cell repr)
-    M->>M: Stage 3 — ICL attention (cell × cell, target-aware)
-    M->>PH: query_cell_repr (batch, d_model)
-    PH->>L: predicted_pseudotime (batch,) via sigmoid
-
-    M->>CH: query_cell_repr (batch, d_model)
-    CH->>L: alpha (batch, K=8) via softplus + 1e-6
-    L->>L: loss = MSE/MSE₀ + DirichletNLL/DirNLL₀
+```
+h5ad file
+    └──► ProcessedDataset.from_anndata(h5ad_path, cfg.data)
+              HVG selection (2000 genes, seurat flavor)
+              log1p normalisation
+              soft labels (distance-to-centroid softmax)
+              schema validation (6 invariants)
+         │
+         ▼
+    ContextSampler(dataset, cfg.context)
+         Pre-builds: _day_to_indices, _pt_bin_to_indices, _class_to_indices
+         │
+         ▼ per training step
+    sampler.sample(query_cell_id)
+         → anchor_ids (day + pseudotime + composition components)
+         │
+         ▼
+    CellTableBuilder.build(query_id, anchor_ids)
+         → CellTable (model input), TrainingTargets (loss only)
+         │
+         ▼
+    icl_collate([(table, targets)])
+         → ICLBatch (B=1 tensors on CPU)
+         │
+         ▼
+    TabICLRegressor.forward(batch)
+         Stage 1: col_embedder  — gene × gene attention
+         Stage 2: row_interactor — feature → cell repr
+         Stage 3: anchor_label_embedder — inject anchor targets
+         Stage 4: tf_icl — query attends to anchor context
+         Stage 5: shared_trunk → PseudotimeHead + DirichletCompositionHead
+         │
+         ▼
+    DirichletDualHeadLoss(pt_pred, alpha, targets)
+         → (total_loss, pt_loss, comp_loss)
+         │
+         ▼
+    MuonAdamW.step()
 ```
 
-### 4.2 Composition Head Data Flow
+### 4.2 Inference Flow (Day-11 Evaluation)
 
-```mermaid
-sequenceDiagram
-    participant ICL as ICL Stage Output
-    participant LIN as Linear(d_model → K=8)
-    participant SP as Softplus
-    participant EPS as + 1e-6
-    participant DIR as Dirichlet(α)
-    participant NLL as Negative Log-Likelihood
-    participant SL as Soft Labels (K-vector)
-
-    ICL->>LIN: query_cell_repr (batch, d_model)
-    Note over LIN: bias init = 1.0 → softplus(1.0) ≈ 1.31
-    LIN->>SP: raw_logits (batch, K)
-    Note over SP: ensures all values > 0
-    SP->>EPS: positive_values (batch, K)
-    Note over EPS: numerical stability — prevents α_k = 0
-    EPS->>DIR: alpha (batch, K) — Dirichlet concentration parameters
-    DIR->>NLL: log_prob(soft_labels)
-    SL->>NLL: soft_labels (batch, K) — rows sum to 1.0
-    NLL->>NLL: loss = -mean(log Dir(soft_labels | alpha))
 ```
+For each day-11 cell:
+    sampler.sample(cid)           → anchor context (training cells only)
+    builder.build(cid, anchors)   → CellTable
+    icl_collate(...)              → ICLBatch
+    model(batch)                  → (pt_pred, alpha)
+    alpha / alpha.sum()           → normalised composition prediction
 
-### 4.3 WLS Perturbation Test Flow
-
-```mermaid
-sequenceDiagram
-    participant DS as ProcessedDataset
-    participant CB as CellTableBuilder
-    participant M as Trained TabICLRegressor
-    participant AS as AttentionScorer
-    participant T as Test Assertions
-
-    DS->>CB: day 16 test cell IDs
-    CB->>M: baseline_table (no perturbation)
-    CB->>M: ko_table (perturbation_mask={"WLS": 0.0})
-
-    M->>T: predict(baseline_table) → pt_baseline
-    M->>T: predict(ko_table) → pt_ko
-    Note over T: Signal 1: pt_ko - pt_baseline < -0.05
-
-    AS->>T: score(baseline_table)["WLS"] → attn_baseline
-    AS->>T: score(ko_table)["WLS"] → attn_ko
-    Note over T: Signal 2: attn_ko < 0.1 × attn_baseline
-
-    M->>T: predict_composition(ko_table) vs predict_composition(baseline_table)
-    Note over T: Signal 3 (primary): composition shift away from non-telencephalic states
-    end
+Metrics:
+    Pseudotime : Spearman ρ, MAE
+    Composition: Wasserstein-1 (PCA ground metric), JSD, Brier score
+    Stratified : W-dist per dominant true class
 ```
 
 ---
 
 ## 5. Implementation Details
 
-### 5.1 Composition Head Activation (Two parallel paths)
-
-Both composition heads and their paired losses are implemented. The active path is selected by `ModelConfig.composition_loss_type`.
+### 5.1 Composition Head Activation
 
 **KL path (`rotation_001`, `composition_loss_type="kl"`):**
 ```python
-# CompositionHead
-def forward(self, x: torch.Tensor) -> torch.Tensor:
+def forward(self, x):
     return torch.softmax(self.linear(x), dim=-1)   # (B, K), rows sum to 1.0
 
-# DualHeadLoss.composition_loss — KL(target ∥ pred)
+# DualHeadLoss.composition_loss
 kl = (comp_target * (log_target - log_pred)).sum(dim=-1)
 return kl.mean()
 ```
 
 **Dirichlet NLL path (`rotation_002`, `composition_loss_type="dirichlet"`):**
 ```python
-# DirichletCompositionHead
-def forward(self, x: torch.Tensor) -> torch.Tensor:
-    return F.softplus(self.linear(x))   # (B, K), all > 0 (concentration parameters)
+def forward(self, x):
+    # clamp prevents float32 softplus overflow (exp > 88 → inf; inf/inf = NaN in α/Σα)
+    return F.softplus(self.linear(x).clamp(max=80.0))
 
 # DirichletDualHeadLoss.composition_loss
 return -torch.distributions.Dirichlet(concentrations).log_prob(comp_target).mean()
 ```
 
-**Comparison:**
+### 5.2 Bias Initialisation
 
-| | KL divergence | Dirichlet NLL |
-|---|---|---|
-| Head output | Probability vector (softmax) | Concentration parameters α_k (softplus) |
-| Loss scale | O(0.01–0.5) | O(10–20) — unbounded below as concentrations sharpen |
-| Uncertainty | None — point estimate | α₀ = Σα_k (precision), Var(p̂_k) per class |
-| Optimiser weighting | Kendall σ for both tasks | Fixed `lambda_comp=0.1`; Kendall σ on pseudotime only |
-| Run | `rotation_001` | `rotation_002` |
-
-**Why Dirichlet NLL uses fixed weight:** Dirichlet NLL is unbounded below. During training, as concentrations α sharpen to fit the data, the log-likelihood grows without ceiling. Kendall's σ_comp would chase it toward −∞, causing the total loss to diverge. Fixed `lambda_comp=0.1` prevents this while keeping composition gradient magnitude comparable to the Kendall-weighted MSE term.
-
-### 5.2 Bias Initialisation Logic
-
-**PseudotimeHead:**
 ```python
+# PseudotimeHead: sigmoid(0.5) ≈ 0.62 — trajectory midpoint prior
 nn.init.constant_(self.linear.bias, 0.5)
-# sigmoid(0.5) = 0.622 — slightly above midpoint
-# In practice this means: at step 0, every cell is predicted slightly above DC1 midpoint
-# The model learns trajectory by deviating from this prior
-# This keeps initial MSE ≈ 0.083 (variance of Uniform[0,1])
-# rather than ≈ 25-100 with random init (unstable initial gradients)
-```
 
-**CompositionHead:**
-```python
+# CompositionHead: uniform prior at init
 nn.init.constant_(self.linear.bias, 0.0)
-# softmax of zero-bias linear = uniform over K states at init (when weights ≈ 0)
-# The model learns state affinity by deviating from this uniform prior
-# Initial KL divergence against non-uniform soft labels drives early training signal
-# (When Dirichlet NLL upgrade ships, bias will change to 1.0 → softplus(1.0) ≈ 1.31)
-```
 
-**Weight initialisation (both heads):**
-```python
+# Both heads: near-zero weights prevent large initial gradients
 nn.init.normal_(self.linear.weight, mean=0.0, std=0.01)
-# Near-zero weights ensure predictions cluster near the bias at step 0
-# Prevents large initial gradients from high-expression outlier cells
-# Without this, a gene expressed at TPM 10000 (log1p ≈ 9.2) would
-# push predictions far outside [0,1] before the sigmoid can compensate
 ```
 
-### 5.4 Soft Label Generation
+### 5.3 Soft Label Generation
 
-K=8 states from `class3` annotations. Cluster centroids computed in PCA space, soft labels via temperature-scaled softmax of negative distances.
-
-```python
-def _compute_soft_labels(expression_pca, cluster_ids, config):
-    # 1. Compute cluster centroids in PCA space (top 50 PCs)
-    # K=8: Neurectoderm, Late Neurectoderm, Unknown proliferating,
-    #       Prosencephalic, Late Prosencephalic, Telencephalic,
-    #       Diencephalic, Tel/Die neurons
-    centroids = {k: expression_pca[cluster_ids == k].mean(axis=0) for k in range(K)}
-
-    # 2. For each cell: distances to all centroids
-    distances = np.array([
-        [np.linalg.norm(cell - centroids[k]) for k in range(K)]
-        for cell in expression_pca
-    ])
-
-    # 3. Temperature-scaled softmax of negative distances
-    scaled = -distances / config.label_softening_temperature
-    exp_scaled = np.exp(scaled - scaled.max(axis=1, keepdims=True))  # numerical stability
-    soft_labels = exp_scaled / exp_scaled.sum(axis=1, keepdims=True)
-
-    # Biological sanity check:
-    # Day 5 cells should have highest mean affinity for state 0 (Neurectoderm)
-    assert soft_labels[collection_day == 5, 0].mean() > 0.5
-
-    return soft_labels.astype(np.float32)
-```
-
-**Temperature effects:**
-
-| Temperature | Effect |
-|---|---|
-| `τ → 0` | Hard labels — each cell assigned entirely to nearest centroid |
-| `τ = 0.5` | Sharp soft labels — cells near boundaries remain ambiguous |
-| `τ = 1.0` | Default — moderate softness, appropriate for organoid data |
-| `τ = 5.0` | Very soft — most cells near-uniform across states |
+K=8 states from `class3` annotations. Cluster centroids in PCA space; soft labels via temperature-scaled softmax of negative distances (`label_softening_temperature=1.0`). `centroid_distances` (inter-centroid PCA distances) is stored in `ProcessedDataset` and used as the ground metric for Wasserstein evaluation.
 
 ---
 
 ## 6. Integration Guide
 
-### 6.1 Rotation Scope Training Loop
+### 6.1 Training Loop
 
 ```python
 from spatialmt.config.experiment import ExperimentConfig
 from spatialmt.data_preparation.dataset import ProcessedDataset
 from spatialmt.context.sampler import ContextSampler
 from spatialmt.context.builder import CellTableBuilder
-from spatialmt.context.collate import icl_collate, ICLBatch
 from spatialmt.model.trace import TabICLRegressor
-from spatialmt.explainability.scorers import AttentionScorer
+from spatialmt.model.loss import DirichletDualHeadLoss
 from spatialmt.training.trainer import Trainer
 
-# 1. Load and save config (creates experiments/{run_id}/config.json)
-cfg = ExperimentConfig.rotation_finetune(run_id="rotation_001")
-cfg.save()
-
-# 2. Build validated dataset
-dataset = ProcessedDataset.from_anndata(
-    h5ad_path=cfg.data.h5ad_path,
-    config=cfg.data,
-)
-
-# 3. Instantiate model with pre-trained weights
-model = TabICLRegressor.load_pretrained(
-    config=cfg.model,
-    n_genes=dataset.n_genes,
-    checkpoint_path="weights/tabicl_v2_pretrained.pt",
-)
-
-# 4. Instantiate context components
+cfg = ExperimentConfig.full_finetune_dirichlet(run_id="rotation_002")
+dataset = ProcessedDataset.from_anndata(h5ad_path, cfg.data)
 sampler = ContextSampler(dataset, cfg.context)
-builder = CellTableBuilder(dataset, cfg.context)
+builder = CellTableBuilder(dataset)
+model = TabICLRegressor(n_genes=dataset.n_genes, k=cfg.data.n_cell_states,
+                        composition_loss_type="dirichlet", ...).to(device)
+model.load_backbone(cfg.model.backbone_path)
+loss_fn = DirichletDualHeadLoss().to(device)
 
-# 5. Instantiate AttentionScorer callback
-attention_scorer = AttentionScorer(cfg.explainability)
-
-# 6. Train (dual-head — pseudotime + composition)
-trainer = Trainer(
-    model=model,
-    dataset=dataset,
-    sampler=sampler,
-    builder=builder,
-    config=cfg,
-    callbacks=[attention_scorer],
-)
-trainer.fit()
-
-# 7. Metrics written automatically to experiments/rotation_001/metrics.json
+trainer = Trainer(model=model, dataset=dataset, sampler=sampler,
+                  builder=builder, loss_fn=loss_fn, config=cfg,
+                  n_steps=25000, eval_every=500)
+metrics = trainer.fit()
 ```
 
-### 6.2 Running the Baseline Ladder
+### 6.2 Checkpoint Loading (Inference)
 
 ```python
-from spatialmt.model.baselines import MeanPredictor, RidgeBaseline, XGBoostBaseline
-from spatialmt.evaluation.metrics import evaluate_baseline, compare_baselines
-
-# All baselines use the same hold-out: day 11 cells excluded from training
-X_train = dataset.expression[dataset.collection_day != 11]
-y_train = dataset.pseudotime[dataset.collection_day != 11]
-X_test = dataset.expression[dataset.collection_day == 11]
-y_test = dataset.pseudotime[dataset.collection_day == 11]
-
-models = {
-    "mean": MeanPredictor(),
-    "ridge_pca": RidgeBaseline(n_components=20),
-    "xgboost": XGBoostBaseline(),
-}
-
-# Returns DataFrame: model × {mae, r2, spearman_rho}
-comparison = compare_baselines(models, X_train, y_train, X_test, y_test)
-print(comparison)
-```
-
-### 6.3 Running the WLS Perturbation Test
-
-```python
-import os
-os.environ["TRACE_CHECKPOINT"] = "experiments/rotation_001/checkpoints/best_model.pt"
-
-# Run the integration test suite
-# pytest tests/integration/test_wls_perturbation.py -v
-#
-# Signal 1: predict(ko) - predict(baseline) < -0.05
-# Signal 2: attention(ko)["WLS"] < 0.1 × attention(baseline)["WLS"]
-# Signal 3: composition shift away from non-telencephalic states (primary signal for WLS)
-```
-
-### 6.4 Callback Registration
-
-The `AttentionScorer` must be registered before training starts. It hooks into the column attention layer via a PyTorch forward hook registered at training start and removed at training end.
-
-```python
-# Inside Trainer.fit():
-for epoch in range(n_epochs):
-    for batch in dataloader:
-        ...
-        loss.backward()
-        optimizer.step()
-        model.on_training_step(global_step)   # Handles warmup unfreezing
-
-    # End of epoch — run attention scorer on day 11 test cells
-    for callback in self.callbacks:
-        callback.on_epoch_end(model, dataset, epoch)
-        # AttentionScorer logs entropy, appends to epoch_scores
+ckpt = torch.load("final.pt", weights_only=True)
+model.load_state_dict(ckpt["model_state"])
+# loss_fn_state included for training resumption; not required for inference
 ```
 
 ---
@@ -1135,143 +573,80 @@ for epoch in range(n_epochs):
 
 ```python
 HARDWARE_TIERS = {
-    "debug":    {"max_genes": 256,  "max_context_cells": 30},
+    # max_context_cells = 5 active days × cells_per_bin (D11 excluded at runtime)
+    "debug":    {"max_genes": 256,  "max_context_cells": 50},
     "standard": {"max_genes": 512,  "max_context_cells": 50},
-    "full":     {"max_genes": 1024, "max_context_cells": 100},
+    "full":     {"max_genes": 2000, "max_context_cells": 50},
 }
 ```
 
-`batch_size` is not a field — `Trainer.fit()` always constructs a single `(query, context)` pair per step (effective batch size = 1). See decision T2.
+All tiers share `max_context_cells=50`. This reflects the dataset reality: there are exactly 5 active collection days after D11 exclusion (D5, D7, D16, D21, D30). At `cells_per_bin=10` (full/standard tier) the maximum context window is 5 × 10 = 50. `cells_per_bin` is the only lever; `n_bins` has been removed as dead config.
 
-### 7.2 Biological Plausibility Gate
+### 7.2 Myriad Run Configuration (Run 18)
 
-The plausibility gate must pass before the model is used for scientific interpretation.
-
-**Required gene (hard gate):** `SOX2` must appear in top-20 column attention genes on day 11 test cells.  
-**Monitored genes:** `POU5F1`, `WLS`, `YAP1`, `SIX3`, `LHX2`
-
-**Fallback decision tree:**
 ```
-Bio plausibility FAILED
-        │
-        ├─► Check attention_entropy at epoch 20
-        │       │
-        │       ├─► entropy > 8.5 (near-uniform over 512 genes)
-        │       │       → Pre-training bias is harmful
-        │       │       → Switch ModelConfig.finetune_strategy = "scratch"
-        │       │       → Retrain from scratch
-        │       │
-        │       └─► entropy < 8.5 (model is focused, wrong genes)
-        │               → LR schedule issue
-        │               → Reduce lr_col to 5e-6, increase warmup_col_steps to 1000
-        │               → Retrain from fine-tuned checkpoint
-        │
-        └─► If both attempts fail:
-                → max_genes is likely too low
-                → Switch to hardware_tier="full" on A100
-                → Resubmit with max_genes=1024
+N_STEPS              = 25,000
+N_ICL_WARMUP_STEPS   = 2,500   (10% warmup ratio — matches working debug runs)
+cells_per_bin        = 10      (5 active days × 10 = 50 context cells)
+max_genes            = 2000    (full HVG set)
+supervised_batch_size = 4      (2000 × 4 = 8k col ops — safe on A100 80GB)
+composition_loss_type = dirichlet
 ```
 
 ---
 
 ## 8. Test Architecture
 
-### 8.1 Test Layers and Scope
+### 8.1 Test Layers
 
-| Layer | Location | Requires | Runs in CI |
-|---|---|---|---|
-| Unit | `tests/unit/` | Synthetic fixtures only | Yes |
-| Smoke | `tests/smoke/` | Toy model (untrained) | Yes |
-| Integration | `tests/integration/` | Trained model checkpoint (skips without) | Partially |
-| Biological sanity | `tests/biological_sanity/` | Trained model + real data | Manual only |
+| Layer | Location | Runs in CI |
+|---|---|---|
+| Unit | `tests/unit/` | Yes |
+| Integration | `tests/integration/` | Partially |
 
-### 8.2 Key Test Fixtures
+### 8.2 Current Test Status
 
-```python
-# conftest.py — session-scoped, built once per test run
+**405 tests passing, 0 failing** (as of v1.9.0).
 
-# Implemented
-debug_config                    # ExperimentConfig.debug_preset()
-synthetic_dataset               # 100 cells, 10 genes, K=8 soft_labels, diffusion pseudotime
-synthetic_dataset_with_labels   # 120 cells — day-5 cells labelled Neurectoderm
-
-# Planned (added when model layer is implemented)
-toy_model                       # TabICLRegressor(n_layers=2, d_model=32, n_genes=10)
-synthetic_attention_weights     # (n_heads=2, n_genes=10) — SOX2 boosted to highest weight
-correlated_expression           # GENE_02 and GENE_03 perfectly correlated (SHAP stability)
-```
-
-### 8.2a Data Preparation and Model Tests
-
-**Unit test files (262 passing; 144 failing due to stale fixture — not a logic regression):**
-
-The failing tests span `test_trainer.py`, `test_context_sampler.py`, `test_cell_table_builder.py`, `test_icl_collate.py`, and `test_callbacks.py`. All failures share a single root cause: synthetic `ProcessedDataset` fixtures in `tests/conftest.py` and individual test files construct `ProcessedDataset` without the `centroid_distances` argument that was added when `ProcessedDataset.from_anndata()` began computing it. This is a fixture update task, not a model or training logic regression.
-
-- `tests/unit/test_experiment_config.py` — 44 tests GREEN: ExperimentConfig serialisation, hash, presets, sub-config validation, lr fields
-- `tests/unit/test_dataset.py` — 32 tests GREEN: ProcessedDataset schema contract, soft label computation, manifest hash
-- `tests/unit/test_trace_model.py` — 53 tests GREEN: TabICLRegressor construction, forward pass contracts, AnchorLabelEmbedder, AttentionScorer, parameter groups, gradient flow
-- `tests/unit/test_dual_head_loss.py` — 26 tests GREEN: DualHeadLoss Kendall weighting, KL divergence component, uncertainty mechanics
-- `tests/unit/test_context_sampler.py` — failing (stale fixture)
-- `tests/unit/test_cell_table_builder.py` — failing (stale fixture)
-- `tests/unit/test_icl_collate.py` — failing (stale fixture)
-- `tests/unit/test_trainer.py` — failing (stale fixture)
-- `tests/unit/test_callbacks.py` — failing (stale fixture)
-
-**Integration test files:**
-- `tests/integration/test_prep.py` — tests for `spatialmt.data_preparation.prep` (moved from `test/` in v1.3.0)
-- `tests/integration/test_dataset.py` — 18 integration tests for `ProcessedDataset.from_anndata` (require anndata/scanpy)
-
-**`test_prep.py` test groups:**
-- **HVG selection** (8 tests): gene count, copy safety, subset invariant, flavor guard (seurat vs seurat_v3 on normalised/raw data), n_top_genes edge case
-- **Expression matrix validation** (3 tests): NaN/negative/Inf guard documentation
-- **Pseudotime contract** (4 tests): parametrized across all pseudotime functions — output type, name, [0,1] range, length
-- **`prepare_dataset` composition** (3 tests): monkeypatched `load_h5ad`, shape consistency, field completeness
-
-**`test_dataset.py` (integration) test groups:**
-- **Happy path** (6 tests): n_cells, n_genes, expression float32, max < 20.0, pseudotime in [0,1], no NaN
-- **Schema** (5 tests): missing pseudotime column raises, collection_day values and dtype, soft_labels shape/sum/dtype, manifest hash
-- **Auto-normalisation** (2 tests): raw counts input is normalised; already-normalised input is unchanged
-- **Error handling** (5 tests): missing cell_type_key, missing pseudotime obs column, malformed orig_ident
+| File | Count | Status |
+|---|---|---|
+| `test_experiment_config.py` | ~34 | ✓ |
+| `test_dataset.py` | ~26 | ✓ |
+| `test_trace_model.py` | ~53 | ✓ |
+| `test_dual_head_loss.py` | ~26 | ✓ |
+| `test_dirichlet_loss.py` | ~6 | ✓ |
+| `test_dirichlet_composition_head.py` | ~7 | ✓ |
+| `test_context_sampler.py` | ~29 | ✓ |
+| `test_cell_table_builder.py` | ~27 | ✓ |
+| `test_icl_collate.py` | ~28 | ✓ |
+| `test_trainer.py` | ~57 | ✓ |
+| `test_supervised_trainer.py` | ~8 | ✓ |
+| `test_callbacks.py` | ~16 | ✓ |
+| `test_wasserstein.py` | ~19 | ✓ |
+| `test_prep.py` (integration) | ~47 | ✓ |
+| `test_dataset.py` (integration) | ~18 | ✓ |
 
 ### 8.3 Critical Tests
 
 ```python
-# Highest priority — run before any implementation code
-
-# ProcessedDataset schema contracts
+# ProcessedDataset schema
 assert dataset.expression.max() < 20.0
-assert dataset.X.shape[0] == len(dataset.cell_ids) == len(dataset.pseudotime)
-assert dataset.X.shape[1] == len(dataset.gene_names)
 assert not np.any(np.isnan(dataset.expression))
+assert np.allclose(dataset.soft_labels.sum(axis=1), 1.0, atol=1e-5)
 
-# HVG flavor guard
-with warnings.catch_warnings(record=True) as w:
-    select_highly_variable_genes(normalised_adata, flavor="seurat_v3")
-    assert len(w) == 1  # warns on normalised data with seurat_v3
+# ContextConfig validation — 5 active days × cells_per_bin + anchors ≤ max_context_cells
+with pytest.raises(ValueError):
+    ContextConfig(cells_per_bin=11, max_context_cells=50)   # 55 > 50
 
-# Checkpoint round-trip — model and Kendall sigmas restore cleanly
-ckpt = torch.load("step_000001.pt", weights_only=True)
-missing, unexpected = fresh_model.load_state_dict(ckpt["model_state"], strict=True)
+# Checkpoint round-trip
+ckpt = torch.load("final.pt", weights_only=True)
+missing, unexpected = model.load_state_dict(ckpt["model_state"], strict=True)
 assert missing == [] and unexpected == []
-fresh_loss.load_state_dict(ckpt["loss_fn_state"])
-assert torch.isfinite(fresh_loss.log_sigma_sq_pt)
-# DualHeadLoss also has log_sigma_sq_comp; DirichletDualHeadLoss does not
-if hasattr(fresh_loss, "log_sigma_sq_comp"):
-    assert torch.isfinite(fresh_loss.log_sigma_sq_comp)
 
-# loss_history correctness
-result = trainer.fit()
-assert len(result["loss_history"]) == n_steps // eval_every
-assert result["loss_history"][0]["step"] == eval_every
-assert np.isfinite(result["loss_history"][0]["train_loss"])
-
-# WLS perturbation (requires checkpoint — skips otherwise)
-assert predict(ko_table) - predict(baseline_table) < -0.05           # Signal 1: pseudotime shift
-assert attention(ko_table)["WLS"] < 0.1 * attention(baseline)["WLS"]  # Signal 2: attention drop
-assert composition_shift_away_from_nontelencephalic(ko_table, baseline_table)  # Signal 3: primary
-
-# AttentionScorer softmax invariant
-assert abs(sum(scores.values()) - 1.0) < 1e-5
+# Config hash excludes run_id
+cfg1 = ExperimentConfig.debug_preset(run_id="run_1")
+cfg2 = ExperimentConfig.debug_preset(run_id="run_2")
+assert cfg1.config_hash == cfg2.config_hash
 ```
 
 ---
@@ -1281,52 +656,54 @@ assert abs(sum(scores.values()) - 1.0) < 1e-5
 ### 9.1 UCL Myriad Job Submission
 
 ```bash
-# Step 1 — always run debug tier first (validates pipeline on CPU, no queue)
-qsub slurm_jobs.sh   # see DEBUG_SCRIPT section
+# Sync code to Myriad
+rsync -avz --exclude='data/' --exclude='experiments/' --exclude='.git/' \
+    ./ zcbtcl9@myriad.rc.ucl.ac.uk:~/Scratch/TRACE/
 
-# Step 2 — rotation primary (submit by Week 7, May 6th)
-qsub slurm_jobs.sh   # see ROTATION_FINETUNE_SCRIPT section
-# Resources: V100 16GB, 24h, 32GB RAM
+# Submit job
+ssh zcbtcl9@myriad.rc.ucl.ac.uk "cd ~/Scratch/TRACE && qsub myriad_trace.sh"
 
-# Step 3 — XGBoost baseline (can run locally, no GPU needed)
-python -m spatialmt.model.baselines.xgboost_baseline --preset rotation_xgboost
-
-# Extended training — more epochs/genes (A100, submit if rotation results warrant)
-qsub slurm_jobs.sh   # see FULL_FINETUNE_SCRIPT section
-# Resources: A100 40GB, 48h, 64GB RAM
+# Retrieve logs
+rsync -avz "zcbtcl9@myriad.rc.ucl.ac.uk:~/Scratch/TRACE/logs/trace_JOBID.*" ./
 ```
+
+**Resources (A100 node):** `h_rt=2:00:00`, `mem=4G`, `gpu=1`, `pe smp 4`, `tmpfs=20G`  
+**h5ad staging:** Copied to `$TMPDIR` at job start for faster random access than Lustre home.
 
 ### 9.2 Environment Setup
 
 ```bash
-# Clone and install
-git clone https://github.com/ChristianLangridge/SMT-Pipeline.git
-cd SMT-Pipeline
-conda env create -f smt_pipeline.yml
-conda activate smt_pipeline
-pip install -e .                    # Registers spatialmt package
+# On Myriad (handled by myriad_trace.sh)
+module load python/miniconda3/24.3.0-0
+module load cuda/11.8.0/gnu-10.2.0
+conda activate trace
+pip install -e "$PROJECT_ROOT" --quiet   # registers spatialmt
 
-# Verify installation
-python -c "from spatialmt.config import Paths; print(Paths.processed_tpm)"
-
-# Run unit tests (no GPU, no real data required)
-pytest tests/unit/ tests/smoke/ -v
+# Local
+pip install -e .
+pytest tests/unit/ -v
 ```
 
-### 9.3 Critical Milestones
+### 9.3 Run History and Milestones
+
+| Run | Status | Notes |
+|---|---|---|
+| Runs 1–9 | OOM / config errors | A100 OOM; fixed by `supervised_batch_size=8` |
+| Runs 10–15 | Head collapse / nan ρ | `warmup_icl_steps=10000` (40% of training) caused over-adaptation |
+| Run 16 | Head collapse | `N_ICL_WARMUP_STEPS=10000` — confirmed cause; warmup reduced to 2500 |
+| Run 17 | Crash — `ModuleNotFoundError: No module named 'spatialmt'` | `pip install -e .` missing from job script; warmup still at 1000 |
+| **Run 18** | **Submitted** | pip install fixed; warmup=2500; 2000 genes; 50 context cells |
 
 | Date | Milestone | Status |
 |---|---|---|
-| Week 2 end (Apr 1) | AnnData inspected — class3 labels, cell counts, day 30 confirmed | ✓ Complete |
-| Week 4 (Apr 15) | `prep.py` review issues resolved; RED phase tests passing; HVG flavor corrected | ✓ Complete |
-| Week 5 end (Apr 22) | Scaffold pseudotime integrated; `PreparedData` dataclass green | ✓ Complete |
-| Week 6 (Apr 29) | Diffusion pseudotime computed and validated; `ProcessedDataset.from_anndata` implemented and integration-tested | ✓ Complete |
-| Week 7 (Apr 21) | `TabICLRegressor` + `DualHeadLoss` fully implemented; 219 unit tests GREEN; pretrained `Encoder` (tf_icl) integrated; `AnchorLabelEmbedder` formalised | ✓ Complete |
-| Week 7 end (May 6) | **`ContextSampler` + `CellTableBuilder` + `ICLBatch`/`icl_collate` implemented; training loop wired; first Myriad GPU job submitted — dual-head — critical gate** | ✓ Complete — `Trainer`, `MuonAdamW`, `CheckpointCallback` implemented; `trace_myriad_run.py` wired; SLURM script ready; 300/300 unit tests GREEN |
-| Week 8 (May 13) | Baseline ladder (mean → ridge → XGBoost) complete; comparison table generated | |
-| Week 10 (May 27) | Biological plausibility gate — SOX2 in top-20 | |
-| Week 11 (Jun 3) | WLS perturbation Signals 1 + 2 + 3 (composition shift) passing | |
-| Week 15 (Jul 3) | Rotation report + talk submitted | |
+| Week 2 (Apr 1) | AnnData inspected, class3 labels confirmed | ✓ |
+| Week 4 (Apr 15) | prep.py + ProcessedDataset implemented | ✓ |
+| Week 6 (Apr 29) | Diffusion pseudotime integrated | ✓ |
+| Week 7 (May 6) | Full model + training loop implemented; 300+ tests GREEN | ✓ |
+| Week 8 (May 13) | Dirichlet head + DirichletDualHeadLoss implemented | ✓ |
+| Week 8–9 (May 20) | Context sampling ablation (6 modes) complete; 50-cell config confirmed; 405 tests GREEN | ✓ |
+| Week 10 (May 27) | Run 18 results — full config validation on A100 | In progress |
+| Week 15 (Jul 3) | Rotation report + talk submitted | Target |
 
 ---
 
@@ -1334,98 +711,86 @@ pytest tests/unit/ tests/smoke/ -v
 
 ### Original Architecture Decisions (v1.0.0)
 
-| Decision | Rationale | Alternatives considered |
-|---|---|---|
-| TabICLv2 as backbone | Native regression pre-training; clean two-stage attention; ICL with target-aware embeddings | TabICLv1 (classification-only pre-training), scGPT (gene-token, incompatible explainability) |
-| DC1 as pseudotime target | Already computed in paper; validated against chronological collection day in Fig. 2b; no external tool needed | scVelo velocity pseudotime, Palantir branch probabilities |
-| Day 11 withheld as test set | Hardest interpolation point — neuroectoderm-to-neuroepithelial transition | Random 80/20 split (correlated cells from same batch would leak), leave-one-out (too slow for rotation) |
-| Dirichlet head over softmax | Models uncertainty over composition; flat Dirichlet = transitional cell; `Σα_k` is a meaningful confidence readout | Softmax (point estimate, no uncertainty), GMM posterior (requires separate clustering) |
-| Distance-to-centroid softening | Preserves paper's biologically validated cluster identities; deterministic; temperature is explicit hyperparameter | Fuzzy c-means (clusters may not align with paper's annotations), GMM (arbitrary cluster order) |
-| Normalised dual loss | Scale-invariant to batch size and hardware tier; both heads contribute equally from step 1 | Fixed λ annealing (requires tuning), manual λ (not portable across hardware) |
-| Matrigel-only training (v1) | Linear early trajectory; WLS perturbation has a clear directional ground truth | Both conditions combined (branching DC1 collapses into ambiguous [0,1] range) |
-| `AttentionScorer` stage specificity guard | Silent extraction from wrong stage produces biologically uninterpretable weights with no error signal | Warning only (insufficient — wrong stage would invalidate all GRN claims) |
-| 500-step column attention warmup | Column embeddings are re-initialised for gene count; pre-trained patterns must not be perturbed before embeddings stabilise | No warmup (column attention perturbed immediately by random embeddings), full freeze (column attention never fine-tunes) |
-
-### Scope & Baseline Decisions (v1.2.0)
-
-| # | Decision | Rationale |
-|---|---|---|
-| S1 | Days 5–30 full trajectory | Day 30 data available; extends developmental range; broader GRN for validation against KO biology |
-| S2 | Both heads active in rotation scope | On branching trajectory, pseudotime=progression and composition=identity capture orthogonal information; perturbation effects invisible to one visible to other |
-| S3 | Recomputed diffusion pseudotime | Published DC1 covers days 5–11 only; training both heads on full trajectory requires coherent labels for all cells |
-| S4 | K=8 from `class3` annotations | Matches paper's biologically validated cluster identities across the full trajectory |
-| S5 | KO datasets as external GRN validation only | WLS-KO (day 55) and GLI3-KO (day 45) are far outside training distribution (day 5–30); paired WT/KO comparison validates GRN structure |
-| S6 | Regression baseline ladder: mean → ridge → XGBoost | Dual-axis justification: prediction accuracy + GRN explainability; classifiers dropped (resolution cap) |
-| S7 | 6-bin context sampler with day 30 | Day 30 adds a sixth context bin |
-
-### Data Preparation Decisions (v1.2.0)
-
-| # | Decision | Rationale |
-|---|---|---|
-| DP1 | Evolve `prep.py` into `ProcessedDataset` wrapper | Existing extraction functions tested and correct; wrapping adds schema validation without full rebuild |
-| DP2 | No train/test split in data prep | ICL and traditional models need different split strategies; shared concept is day 11 hold-out, implemented downstream |
-| DP3 | `seurat` HVG flavor + data-state guard | Data from Zenodo is normalised; `seurat_v3` on normalised data silently produces incorrect HVGs |
-| DP4 | Scaffold pseudotime annotation | Linear day scaling is temporary; docstring annotation prevents misinterpretation as real pseudotime |
-| DP5 | Dataclass return type (`PreparedData`) | Typed fields, IDE support, shape validation at construction; nucleus of ProcessedDataset evolution |
-| DP6 | Atomic write + manifest (deferred) | Flat-file output is transitional; manifest system belongs in ProcessedDataset.save() |
-| DP7 | Defer densification until after HVG selection | 10x peak memory reduction (3.8 GB → 314 MB); scanpy HVG works natively on sparse |
-| DP8 | Compressed output (`np.savez_compressed`) | Minimal effort, ~50–70% disk savings |
-| DP9 | Lightweight memory pre-check | Prevents wasted time on OOM; warn if estimated peak > 80% available memory |
-
-### Baseline Evaluation Protocol (v1.2.0)
-
-**Decision:** Baseline models (XGBRegressor, LinearRegressor, XGBClassifier, NearestCentroid) were trained on the **full dataset with no day 11 holdout**. The data preparation pipeline (`prep.py`, `diffusion_trajectory.py`) processes all cells together — HVG selection and diffusion pseudotime computation are performed across all timepoints including day 11.
-
-**Rationale:** The purpose of the baselines is to establish a performance floor that justifies the development of TRACE. Introducing a day 11 holdout at this stage would create two problems:
-
-1. *Pseudotime leakage.* Diffusion pseudotime is computed from the full cell graph. Day 11 cells participate in defining the diffusion manifold — their neighbours, eigenvectors, and DPT distances are co-determined with all other cells. Splitting post-hoc means the test labels were shaped by the test cells themselves.
-2. *HVG leakage.* Feature selection (2000 HVGs, seurat flavor) is performed on all cells. The chosen gene set is informed by day 11 variance.
-
-Training baselines on the full dataset **removes both leakage concerns** and gives each model the maximum possible information advantage. Any TRACE improvement over these baselines is therefore a conservative lower bound — baselines had access to information TRACE will not.
-
-**Future holdout implementation:** When TRACE training begins, the holdout will be introduced correctly:
-- HVG selection on `collection_day != 11` cells only; gene list applied to all cells.
-- Diffusion pseudotime computed excluding day 11 cells; day 11 pseudotime assigned post-hoc via nearest neighbour in PCA space (reusing the `assign_prolif_pseudotime()` pattern already implemented in `diffusion_trajectory.py`).
-
-**Git checkpoint:** The commit at tag `baselines-complete` records the codebase state at the end of baseline evaluation, before holdout logic is introduced.
-
-| # | Decision | Rationale |
-|---|---|---|
-| BE1 | Baselines trained on full dataset, no holdout | Eliminates pseudotime and HVG leakage; gives baselines maximum information advantage; any TRACE gain is a conservative lower bound |
-| BE2 | Day 11 holdout deferred to TRACE training phase | Correct holdout requires leakage-free HVG selection and post-hoc pseudotime assignment — infrastructure not needed until TRACE is implemented |
-| BE3 | `assign_prolif_pseudotime()` reused for day 11 holdout | Pattern already implemented and tested for proliferating cells; generalises directly to day 11 exclusion without new logic |
-
-### Implementation Decisions (v1.3.0)
-
-| # | Decision | Rationale |
-|---|---|---|
-| I1 | `data_preparation2/` as the `ProcessedDataset` package (not `data/`) | Avoided disrupting `data_preparation/` prep.py code during transition; rename deferred until model pipeline is built |
-| I2 | `from_anndata` delegates to `prep.py` functions rather than reimplementing extraction | Extraction functions in prep.py are tested and correct; `from_anndata` adds the schema-validated wrapper layer without duplicating logic |
-| I3 | Day 11 holdout excluded from `from_anndata` | Holdout logic belongs to `ContextSampler` — ICL and baseline pipelines need different split strategies; `ProcessedDataset` carries all cells |
-| I4 | `test/` merged into `tests/integration/` | Single test root; `pyproject.toml` testpaths simplified; prevents silent test discovery gaps |
-| I5 | Diffusion pseudotime loaded from `adata.obs["rank-transformed-pseudotime"]` | Written by `merge_and_save` in `diffusion_trajectory.py`; `from_anndata` raises clearly if the column is absent rather than silently using a scaffold fallback |
-
----
+| Decision | Rationale |
+|---|---|
+| TabICLv2 as backbone | Native regression pre-training; clean two-stage attention; ICL with target-aware embeddings |
+| Day 11 withheld as test set | Hardest interpolation point — neuroectoderm-to-neuroepithelial transition |
+| Dirichlet head over softmax | Models uncertainty over composition; α₀ = Σα_k is a meaningful confidence readout |
+| Distance-to-centroid softening | Preserves paper's biologically validated cluster identities; deterministic |
+| Matrigel-only training | Linear early trajectory; clear directional ground truth for validation |
+| 500-step column attention warmup | Column embeddings re-initialised for gene count; pretrained patterns must stabilise before fine-tuning |
 
 ### Training Layer Decisions (v1.7.0)
 
 | # | Decision | Rationale |
 |---|---|---|
-| T1 | `col_embedder.*` always excluded from `load_backbone()` | Pretrained column embeddings are position-indexed (feature order in the pretraining tabular task), not gene-name-indexed. They cannot transfer to a new gene set and must be reinitialised fresh every run. Loading them would produce a silent shape mismatch or incorrect GRN signal. |
-| T2 | `batch_size` removed from `HARDWARE_TIERS`; effective batch size = 1 | `Trainer.fit()` always calls `icl_collate([(table, targets)])` — one pair per step. `batch_size` was dead config, never consumed. True batching (loop B pairs, pass list to `icl_collate`) is straightforward but the CPU-side `build()` loop is the bottleneck; deferred post-Myriad run. |
-| T3 | `Trainer.fit()` returns `loss_history` (per-interval averages) | Single-sample gradient updates (batch=1) produce noisy step-level loss. Interval averages over `eval_every` steps smooth the signal enough to diagnose convergence without TensorBoard. Returning from `fit()` keeps the Myriad script self-contained — no external logging service needed on the cluster. |
-| T4 | `trace_myriad_run.py` saves 3-panel loss curve PNG to checkpoint dir | Post-training convergence check without interactive tooling. Pseudotime and composition losses are plotted separately to distinguish which head is responsible for any plateau. |
-| T5 | `CheckpointCallback` saves `loss_fn.state_dict()` alongside model and optimizer | `DualHeadLoss.log_sigma_sq_pt` and `log_sigma_sq_comp` are learnable `nn.Parameter` scalars (Kendall uncertainty weighting). Omitting them from the checkpoint would reset the learned task weighting on resume, distorting the early steps of any continued training run. |
+| T1 | `col_embedder.*` always excluded from `load_backbone()` | Pretrained column embeddings are position-indexed, not gene-name-indexed |
+| T2 | Effective batch size = 1 | `Trainer.fit()` always calls `icl_collate([(table, targets)])` — one pair per step |
+| T3 | `fit()` returns `loss_history` | Interval averages smooth noisy batch=1 gradients; enables convergence diagnosis without TensorBoard |
+| T4 | 3-panel loss curve PNG saved to checkpoint dir | Post-training convergence check without interactive tooling on Myriad |
+| T5 | `CheckpointCallback` saves `loss_fn.state_dict()` | Kendall `log_sigma_sq_pt` is a learnable parameter; omitting it resets task weighting on resume |
 
-### Dirichlet NLL and Loss Weighting Decisions (v1.8.0)
+### Dirichlet NLL Decisions (v1.8.0)
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | `DirichletDualHeadLoss` uses fixed `lambda_comp=0.1` instead of Kendall weighting for composition | Dirichlet NLL is unbounded below — concentrations sharpen during training, driving log-likelihood to −∞ without a ceiling. Kendall's σ_comp would diverge. Fixed λ keeps concentration magnitudes interpretable and preserves α₀ / Var(p̂_k) as meaningful uncertainty readouts for downstream GRN edge confidence scoring. |
-| D2 | Both loss classes retained in parallel (`DualHeadLoss` for `rotation_001`, `DirichletDualHeadLoss` for `rotation_002`) | Enables direct comparison of KL vs Dirichlet NLL composition training on the same dataset and architecture. `composition_loss_type` on `ModelConfig` is the single switch. |
-| D3 | `lr_col` reduced from `1e-5` → `1e-6` | Column attention was perturbing too aggressively in early steps before the col_embedder gene representations stabilised. The 500-step warmup freeze prevents updates entirely before step 500, but on unfreeze the original 1e-5 still produced instability. 1e-6 keeps the pretrained GRN signal intact while allowing slow fine-tuning. |
-| D4 | `SupervisedTrainer` implemented alongside `Trainer` | Provides a batched alternative when ICL sampling overhead dominates training time. Uses population-mean anchor rather than stochastic context, and permanently freezes `tf_icl` to avoid training the ICL mechanism without a proper context window. Useful for head-only fine-tuning or debugging head initialisation independently of the ICL pathway. |
+| D1 | Fixed `lambda_comp=0.1` for Dirichlet NLL | Dirichlet NLL is unbounded below; Kendall σ_comp would diverge as concentrations sharpen |
+| D2 | Both KL and Dirichlet paths retained | Enables direct comparison; `composition_loss_type` is the single switch |
+| D3 | `lr_col` reduced 1e-5 → 1e-6 | Column attention instability on unfreeze; 1e-6 preserves pretrained GRN signal |
+| D4 | `SupervisedTrainer` alongside `Trainer` | Batched head-only fine-tuning path; useful for debugging head initialisation |
+
+### Context Sampling & Config Decisions (v1.9.0)
+
+| # | Decision | Rationale |
+|---|---|---|
+| C1 | `n_bins` removed entirely from `ContextConfig` | Field was dead — `ContextSampler` always bins by actual collection days in the dataset (5 active days). The validator used `n_bins × cells_per_bin` but `n_bins` never matched runtime behaviour. Replaced with hardcoded `5 active days` in the validator. |
+| C2 | `max_context_cells=50` for all tiers | There are exactly 5 active collection days (D5, D7, D16, D21, D30). Maximum context window is 5 × cells_per_bin. Old `full` tier value of 100 assumed a nonexistent 10-day dataset. |
+| C3 | `cells_per_bin=10` for full/standard presets | 6-mode sampling ablation (1000 steps, 256 genes, seed=42) showed day-50-cell run achieves ρ=0.648 vs ρ=0.584 at 25 cells. More anchors per day gives the ICL transformer a richer developmental timeline. |
+| C4 | Pure day-stratified sampling for Myriad run | Ablation confirmed: composition-aware sampling does not fix Prosencephalic failure (structural data limitation); day-stratified preserves best pseudotime accuracy (ρ) which is the primary deliverable metric. |
+| C5 | `N_ICL_WARMUP_STEPS=2500` (10% of 25,000) | Run 16 used 10,000 warmup steps (40% ratio) — heads over-adapted to frozen tf_icl; on unfreeze the residual stream shift caused head collapse (ρ=NaN). Debug runs at 100/1000 (10%) consistently achieve ρ~0.65. Fixing the ratio to 10% resolves the collapse. |
+| C6 | `max_genes=2000` for full tier | Pipeline natively selects 2000 HVGs via `select_highly_variable_genes`. 1024 was a VRAM engineering cap, not a biological optimum. At `supervised_batch_size=4` the col operation is 2000 × 4 = 8k — safe on A100 80GB. Additional genes may help the ColEmbedding discriminate Prosencephalic lineage-specifying markers (OTX2, FOXG1) from the general neurectoderm background. |
+| C7 | Softplus overflow fix: `.clamp(max=80.0)` on `DirichletCompositionHead` input | Float32 `exp(x)` overflows for x > 88, producing `inf` alpha values and `inf/inf = NaN` in normalised composition predictions. Pre-fix baseline metrics (W-dist 1.96) were partially numerical artifacts; post-fix metrics (W-dist 2.09 at 50 cells) are the honest benchmark. |
 
 ---
 
-*This document reflects all architectural decisions through v1.8.0 (May 2026). The rotation scope (dual-head, regression baseline ladder, WLS/GLI3 perturbation validation) targets July 3rd.*
+## 11. Future Directions
+
+### 11.1 TRACE as a Biologist Tool
+
+The rotation deliverable establishes TRACE as a developmental coordinate predictor for unannotated scRNA-seq data from the same neurectoderm organoid system. The practical workflow:
+
+1. Biologist generates a new scRNA-seq dataset from an NE organoid experiment.
+2. Standard Seurat preprocessing (normalise, log1p, HVG selection against the training gene list).
+3. TRACE forward pass: each cell gets a pseudotime coordinate ∈ (0, 1) and a K-vector of lineage affinities.
+4. Uncertainty readout via α₀ = Σα_k — cells with low precision are transitional or out-of-distribution.
+5. **In-silico perturbation:** zero a gene's expression in the query row, run a second forward pass, read the shift in pseudotime and composition. Composition shift is the primary readout — lineage-specific effects are visible even when pseudotime shift is small.
+
+This makes TRACE useful for drug effect prediction: a compound that perturbs WNT signalling would produce a detectable shift in telencephalic vs. non-telencephalic composition, quantifiable without wet-lab KO experiments.
+
+### 11.2 Known Limitations for Report
+
+- **Prosencephalic progenitors:** W-dist ~4.8 vs baseline 4.54 across all sampler modes. Structural data limitation (207 D11 cells, pseudotime ambiguity at pt~0.47). Recommend reporting as a known caveat; not addressable within the rotation scope.
+- **Model generalisation:** TRACE is trained on one dataset (Jain et al. 2025, Matrigel condition). Generalisation to other organoid protocols or other labs' data is unvalidated.
+- **col_num_inds=128 bottleneck:** At 2000 genes the ColEmbedding Set Transformer compresses 2000 → 128 inducing points. Whether pretrained weights generalise to this regime is an empirical question answered by Run 18.
+
+### 11.3 TRACE 2.0 — Composition-Aware Sampling
+
+The 6-mode ablation established that composition-stratified anchors do not fix the Prosencephalic failure at debug scale. However, the design of composition-aware sampling guarantees that every cell-type archetype is represented in every context window regardless of class frequency. At full scale (2000 genes, 25,000 steps), this could improve the model's calibration for rare lineages. The three-component sampler infrastructure is already implemented in `ContextSampler`; a future run can test composition-aware sampling at full scale by setting `n_composition_anchors > 0` in the full preset.
+
+### 11.4 Multimodal GRN Pipeline
+
+TRACE is one component of a longer-term multimodal strategy:
+
+1. **TRACE** — pseudotime + composition prediction from scRNA-seq (this rotation)
+2. **ATAC model** — chromatin accessibility encoding; identifies open regulatory regions
+3. **Dedicated GRN model** — integrates TRACE developmental coordinates with ATAC accessibility to produce a state-dependent, lineage-specific gene regulatory network
+
+In this architecture, TRACE's role is to provide high-quality developmental coordinates that condition the GRN model's regulatory graph on cell state. The column attention weights from TRACE are a supplementary certificate of biological grounding, not the primary GRN output.
+
+### 11.5 State-Dependent Perturbation Sensitivity
+
+The ICL mechanism conditions every forward pass on the context window, making TRACE's predictions state-dependent: the same query cell paired with early-stage anchors vs. late-stage anchors will produce different outputs. This makes in-silico perturbation interpretable in a developmental context — the magnitude of a gene knockdown's effect on composition is a function of the cell's developmental state, not just its expression level. Mapping this state-dependence systematically (perturbation × developmental state → composition shift) is the foundation for the GRN inference strategy described in §11.4.
+
+---
+
+*This document reflects all architectural decisions through v1.9.0 (May 2026). The rotation deliverable is developmental coordinate prediction on NE organoid scRNA-seq; target submission July 3rd.*

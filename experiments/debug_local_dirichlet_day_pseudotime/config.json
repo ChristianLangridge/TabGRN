@@ -9,7 +9,6 @@
     "log1p_transform": true
   },
   "context": {
-    "n_bins": 6,
     "cells_per_bin": 3,
     "max_context_cells": 30,
     "allow_replacement": true,
