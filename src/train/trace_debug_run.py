@@ -146,8 +146,7 @@ def main() -> None:
     print(f"  seed        : {SEED if SEED is not None else '(none)'}")
     print(f"  n_steps     : {N_STEPS}")
     print(f"  max_genes   : {cfg.data.max_genes}")
-    print(f"  n_bins      : {cfg.context.n_bins}  "
-          f"cells_per_bin: {cfg.context.cells_per_bin}")
+    print(f"  cells_per_bin: {cfg.context.cells_per_bin}")
     # Resolve backbone path: CLI env var > config > none
     backbone_path = _BACKBONE_OVERRIDE or cfg.model.backbone_path
     print(f"  h5ad        : {H5AD_PATH}")

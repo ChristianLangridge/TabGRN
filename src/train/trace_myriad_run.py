@@ -401,7 +401,7 @@ def main() -> None:
     print(f"  device          : {device}")
     print(f"  seed            : {SEED}")
     print(f"  max_genes       : {cfg.data.max_genes}")
-    print(f"  n_bins          : {cfg.context.n_bins}  cells_per_bin: {cfg.context.cells_per_bin}")
+    print(f"  cells_per_bin   : {cfg.context.cells_per_bin}")
     print(f"  embed_dim       : {m.embed_dim}  "
           f"d_model: {m.num_cls * m.embed_dim}  "
           f"n_heads: {m.n_heads}")

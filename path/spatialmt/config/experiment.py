@@ -81,7 +81,6 @@ class DataConfig:
 
 @dataclass
 class ContextConfig:
-    n_bins: int = 6
     cells_per_bin: int = 5
     max_context_cells: int = 50
     allow_replacement: bool = True
@@ -90,14 +89,16 @@ class ContextConfig:
     n_pseudotime_bins: int = 5
 
     def __post_init__(self) -> None:
+        # Day bins are determined at runtime from the dataset (5 active days after D11 exclusion).
+        # Validate against the worst-case: 5 days × cells_per_bin.
         total = (
-            self.n_bins * self.cells_per_bin
+            5 * self.cells_per_bin
             + self.n_pseudotime_anchors
             + self.n_composition_anchors
         )
         if total > self.max_context_cells:
             raise ValueError(
-                f"n_bins ({self.n_bins}) × cells_per_bin ({self.cells_per_bin}) "
+                f"5 active days × cells_per_bin ({self.cells_per_bin}) "
                 f"+ n_pseudotime_anchors ({self.n_pseudotime_anchors}) "
                 f"+ n_composition_anchors ({self.n_composition_anchors}) = {total} "
                 f"exceeds max_context_cells ({self.max_context_cells}). "
@@ -210,7 +211,6 @@ class ExperimentConfig:
                 hardware_tier="debug",
             ),
             context=ContextConfig(
-                n_bins=6,
                 cells_per_bin=5,
                 max_context_cells=tier["max_context_cells"],
             ),
@@ -230,7 +230,6 @@ class ExperimentConfig:
                 hardware_tier="standard",
             ),
             context=ContextConfig(
-                n_bins=6,
                 cells_per_bin=5,
                 max_context_cells=tier["max_context_cells"],
             ),

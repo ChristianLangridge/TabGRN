@@ -48,20 +48,19 @@ def test_data_config_label_softening_temperature_default():
 # ---------------------------------------------------------------------------
 
 def test_context_config_bins_exceed_max_context_raises():
-    # 6 bins × 10 cells/bin = 60 > max_context_cells=30
+    # 5 active days × 11 cells/bin = 55 > max_context_cells=50
     with pytest.raises(ValueError):
-        ContextConfig(n_bins=6, cells_per_bin=10, max_context_cells=30)
+        ContextConfig(cells_per_bin=11, max_context_cells=50)
 
 
 def test_context_config_exact_capacity_is_valid():
-    # 5 × 5 = 25 == max_context_cells=25 — should not raise
-    cfg = ContextConfig(n_bins=5, cells_per_bin=5, max_context_cells=25)
-    assert cfg.n_bins == 5
+    # 5 × 10 = 50 == max_context_cells=50 — should not raise
+    cfg = ContextConfig(cells_per_bin=10, max_context_cells=50)
+    assert cfg.cells_per_bin == 10
 
 
 def test_context_config_defaults():
     cfg = ContextConfig()
-    assert cfg.n_bins == 6
     assert cfg.cells_per_bin == 5
     assert cfg.max_context_cells == 50
     assert cfg.allow_replacement is True
@@ -155,7 +154,7 @@ def test_config_round_trips_through_json():
     s = json.dumps(d, sort_keys=True)
     d2 = json.loads(s)
     assert d2["data"]["max_genes"] == 256
-    assert d2["context"]["n_bins"] == 6
+    assert d2["context"]["cells_per_bin"] == 5
 
 
 def test_save_writes_config_json(tmp_path, monkeypatch):

@@ -93,9 +93,8 @@ def _make_config(
     allow_replacement: bool = True,
     n_composition_anchors: int = 0,
 ) -> ContextConfig:
-    max_ctx = 6 * cells_per_bin + n_composition_anchors
+    max_ctx = 5 * cells_per_bin + n_composition_anchors
     return ContextConfig(
-        n_bins=6,
         cells_per_bin=cells_per_bin,
         max_context_cells=max_ctx,
         allow_replacement=allow_replacement,
@@ -247,9 +246,9 @@ _N_PT_BINS = 3  # 3 populated ranges in fixture after day-11 exclusion
 
 
 def _pt_cfg(n_pt: int, n_pt_bins: int = _N_PT_BINS, cpb: int = 0, n_comp: int = 0) -> ContextConfig:
-    max_ctx = 6 * cpb + n_pt + n_comp or 30
+    max_ctx = 5 * cpb + n_pt + n_comp or 30
     return ContextConfig(
-        n_bins=6, cells_per_bin=cpb, max_context_cells=max_ctx,
+        cells_per_bin=cpb, max_context_cells=max_ctx,
         n_pseudotime_anchors=n_pt, n_pseudotime_bins=n_pt_bins,
         n_composition_anchors=n_comp,
     )
